@@ -1,0 +1,32 @@
+{
+  "valid_user": {
+    "email": "testuser@example.com",
+    "password": "TestPassword123!"
+  },
+  "invalid_credentials": [
+    {
+      "id": "empty_email",
+      "email": "",
+      "password": "TestPassword123!",
+      "expected_error": "Email is required"
+    },
+    {
+      "id": "empty_password",
+      "email": "testuser@example.com",
+      "password": "",
+      "expected_error": "Password is required"
+    },
+    {
+      "id": "wrong_password",
+      "email": "testuser@example.com",
+      "password": "WrongPassword!",
+      "expected_error": "Invalid credentials"
+    },
+    {
+      "id": "unregistered_email",
+      "email": "notregistered@example.com",
+      "password": "TestPassword123!",
+      "expected_error": "Invalid credentials"
+    }
+  ]
+}

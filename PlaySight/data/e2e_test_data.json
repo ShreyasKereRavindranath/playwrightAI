@@ -1,0 +1,32 @@
+{
+  "users": {
+    "standard": {
+      "username": "standard_user",
+      "password": "secret_sauce"
+    },
+    "locked_out": {
+      "username": "locked_out_user",
+      "password": "secret_sauce",
+      "expected_error": "Sorry, this user has been locked out."
+    },
+    "invalid": {
+      "username": "wrong_user",
+      "password": "wrong_pass",
+      "expected_error": "Username and password do not match any user in this service"
+    }
+  },
+  "products": {
+    "backpack": {
+      "name": "Sauce Labs Backpack",
+      "add_to_cart_key": "sauce-labs-backpack",
+      "expected_price": "$29.99"
+    }
+  },
+  "checkout": {
+    "valid_customer": {
+      "first_name": "John",
+      "last_name": "Doe",
+      "zip_code": "10001"
+    }
+  }
+}

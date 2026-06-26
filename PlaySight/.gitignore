@@ -1,0 +1,33 @@
+# ── Secrets (never commit) ────────────────────────────────────────────────
+config/.env
+
+# ── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+*.pyo
+
+# ── Node ──────────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Test run artifacts ────────────────────────────────────────────────────
+logs_and_reports/screenshots/
+logs_and_reports/videos/
+logs_and_reports/a11y/
+logs_and_reports/visual_diffs/
+logs_and_reports/runs/
+logs_and_reports/*.log
+logs_and_reports/*.html
+logs_and_reports/*.db
+logs_and_reports/repair.patch
+logs_and_reports/audit_report.json
+test-results/
+allure-results/
+allure-report/
+
+# ── AI / healing logs ─────────────────────────────────────────────────────
+data/healing_log.json
+
+# ── macOS ─────────────────────────────────────────────────────────────────
+.DS_Store
