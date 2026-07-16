@@ -1,0 +1,27 @@
+============================= test session starts ==============================
+collected 2 items
+
+tests/test_purchase_flow.py::test_login_valid_credentials_redirects_to_inventory FAILED
+tests/test_purchase_flow.py::test_cart_item_count_updates_on_add FAILED
+
+=================================== FAILURES ===================================
+_______________ test_login_valid_credentials_redirects_to_inventory ____________
+    def test_login_valid_credentials_redirects_to_inventory(login_page, e2e_data):
+        login_page.navigate()
+>       login_page.login(user["username"], user["password"])
+  File "pages/login_page.py", line 45, in login
+    self.click(self.login_button)
+playwright._impl._errors.TimeoutError: Locator.click: Timeout 30000ms exceeded.
+  waiting for locator("[data-test=\"login-button\"]") to be visible
+
+_______________ test_cart_item_count_updates_on_add ____________________________
+    def test_cart_item_count_updates_on_add(authenticated_page, inventory_page):
+>       inventory_page.add_product_to_cart(product["add_to_cart_key"])
+  File "pages/inventory_page.py", line 40, in add_to_cart_button
+    return self.page.locator(".btn_inventory")
+playwright._impl._errors.Error: strict mode violation: locator(".btn_inventory") resolved to 6 elements
+
+=========================== short test summary info ============================
+FAILED tests/test_purchase_flow.py::test_login_valid_credentials_redirects_to_inventory
+FAILED tests/test_purchase_flow.py::test_cart_item_count_updates_on_add
+============================== 2 failed in 12.34s ==============================

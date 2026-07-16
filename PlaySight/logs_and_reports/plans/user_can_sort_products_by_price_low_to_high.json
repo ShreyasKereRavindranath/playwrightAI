@@ -1,0 +1,75 @@
+{
+  "feature": "User can sort products by price low to high",
+  "summary": "Coverage for 'User can sort products by price low to high' across inventory.",
+  "generated_by": "offline",
+  "scenarios": [
+    {
+      "id": "user_can_sort_products_by_price_low_to_h_happy_path",
+      "title": "User can sort products by price low to high — happy path",
+      "description": "Verify the primary success path for: User can sort products by price low to high",
+      "priority": "P0",
+      "markers": [
+        "smoke",
+        "regression"
+      ],
+      "pages": [
+        "inventory"
+      ],
+      "data_needs": [
+        "standard_user",
+        "backpack"
+      ],
+      "steps": [
+        {
+          "kind": "act",
+          "description": "add the target product to the cart",
+          "page": "inventory"
+        },
+        {
+          "kind": "assert",
+          "description": "the cart badge reflects the added item",
+          "page": "inventory"
+        }
+      ]
+    },
+    {
+      "id": "user_can_sort_products_by_price_low_to_h_invalid_input",
+      "title": "User can sort products by price low to high — invalid input is rejected",
+      "description": "Verify the feature rejects invalid input and shows an error: User can sort products by price low to high",
+      "priority": "P1",
+      "markers": [
+        "regression",
+        "negative"
+      ],
+      "pages": [
+        "inventory"
+      ],
+      "data_needs": [
+        "invalid_user",
+        "backpack"
+      ],
+      "steps": [
+        {
+          "kind": "arrange",
+          "description": "navigate to the inventory page",
+          "page": "inventory"
+        },
+        {
+          "kind": "act",
+          "description": "submit invalid or incomplete input",
+          "page": "inventory"
+        },
+        {
+          "kind": "assert",
+          "description": "a descriptive error message is displayed",
+          "page": "inventory"
+        },
+        {
+          "kind": "assert",
+          "description": "the user is not advanced to the next state",
+          "page": "inventory"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,145 @@
+{
+  "feature": "User can add a product to the cart and check out",
+  "summary": "Coverage for 'User can add a product to the cart and check out' across login, inventory, cart.",
+  "generated_by": "offline",
+  "scenarios": [
+    {
+      "id": "user_can_add_a_product_to_the_cart_and_c_happy_path",
+      "title": "User can add a product to the cart and check out — happy path",
+      "description": "Verify the primary success path for: User can add a product to the cart and check out",
+      "priority": "P0",
+      "markers": [
+        "smoke",
+        "regression"
+      ],
+      "pages": [
+        "login",
+        "inventory",
+        "cart"
+      ],
+      "data_needs": [
+        "standard_user",
+        "backpack"
+      ],
+      "steps": [
+        {
+          "kind": "arrange",
+          "description": "navigate to the login page",
+          "page": "login"
+        },
+        {
+          "kind": "act",
+          "description": "log in with valid credentials",
+          "page": "login"
+        },
+        {
+          "kind": "act",
+          "description": "add the target product to the cart",
+          "page": "inventory"
+        },
+        {
+          "kind": "assert",
+          "description": "the cart badge reflects the added item",
+          "page": "inventory"
+        },
+        {
+          "kind": "act",
+          "description": "open the cart and verify the item is present",
+          "page": "cart"
+        }
+      ]
+    },
+    {
+      "id": "user_can_add_a_product_to_the_cart_and_c_invalid_input",
+      "title": "User can add a product to the cart and check out — invalid input is rejected",
+      "description": "Verify the feature rejects invalid input and shows an error: User can add a product to the cart and check out",
+      "priority": "P1",
+      "markers": [
+        "regression",
+        "negative"
+      ],
+      "pages": [
+        "login",
+        "inventory",
+        "cart"
+      ],
+      "data_needs": [
+        "invalid_user",
+        "backpack"
+      ],
+      "steps": [
+        {
+          "kind": "arrange",
+          "description": "navigate to the login page",
+          "page": "login"
+        },
+        {
+          "kind": "act",
+          "description": "submit invalid or incomplete input",
+          "page": "login"
+        },
+        {
+          "kind": "assert",
+          "description": "a descriptive error message is displayed",
+          "page": "login"
+        },
+        {
+          "kind": "assert",
+          "description": "the user is not advanced to the next state",
+          "page": "login"
+        }
+      ]
+    },
+    {
+      "id": "user_can_add_a_product_to_the_cart_and_c_end_to_end",
+      "title": "User can add a product to the cart and check out — end to end",
+      "description": "Exercise the full multi-page flow for: User can add a product to the cart and check out",
+      "priority": "P1",
+      "markers": [
+        "e2e",
+        "regression"
+      ],
+      "pages": [
+        "login",
+        "inventory",
+        "cart"
+      ],
+      "data_needs": [
+        "standard_user",
+        "backpack"
+      ],
+      "steps": [
+        {
+          "kind": "arrange",
+          "description": "navigate to the login page",
+          "page": "login"
+        },
+        {
+          "kind": "act",
+          "description": "log in with valid credentials",
+          "page": "login"
+        },
+        {
+          "kind": "act",
+          "description": "add the target product to the cart",
+          "page": "inventory"
+        },
+        {
+          "kind": "assert",
+          "description": "the cart badge reflects the added item",
+          "page": "inventory"
+        },
+        {
+          "kind": "act",
+          "description": "open the cart and verify the item is present",
+          "page": "cart"
+        },
+        {
+          "kind": "assert",
+          "description": "confirm the final success state persists",
+          "page": "cart"
+        }
+      ]
+    }
+  ]
+}

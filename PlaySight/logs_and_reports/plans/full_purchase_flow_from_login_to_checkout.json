@@ -1,0 +1,135 @@
+{
+  "feature": "Full purchase flow from login to checkout",
+  "summary": "Coverage for 'Full purchase flow from login to checkout' across login, checkout.",
+  "generated_by": "offline",
+  "scenarios": [
+    {
+      "id": "full_purchase_flow_from_login_to_checkou_happy_path",
+      "title": "Full purchase flow from login to checkout — happy path",
+      "description": "Verify the primary success path for: Full purchase flow from login to checkout",
+      "priority": "P0",
+      "markers": [
+        "smoke",
+        "regression"
+      ],
+      "pages": [
+        "login",
+        "checkout"
+      ],
+      "data_needs": [
+        "standard_user",
+        "backpack",
+        "valid_customer"
+      ],
+      "steps": [
+        {
+          "kind": "arrange",
+          "description": "navigate to the login page",
+          "page": "login"
+        },
+        {
+          "kind": "act",
+          "description": "log in with valid credentials",
+          "page": "login"
+        },
+        {
+          "kind": "act",
+          "description": "complete checkout with valid customer info",
+          "page": "checkout"
+        },
+        {
+          "kind": "assert",
+          "description": "the order confirmation is shown",
+          "page": "checkout"
+        }
+      ]
+    },
+    {
+      "id": "full_purchase_flow_from_login_to_checkou_invalid_input",
+      "title": "Full purchase flow from login to checkout — invalid input is rejected",
+      "description": "Verify the feature rejects invalid input and shows an error: Full purchase flow from login to checkout",
+      "priority": "P1",
+      "markers": [
+        "regression",
+        "negative"
+      ],
+      "pages": [
+        "login",
+        "checkout"
+      ],
+      "data_needs": [
+        "invalid_user",
+        "backpack",
+        "valid_customer"
+      ],
+      "steps": [
+        {
+          "kind": "arrange",
+          "description": "navigate to the login page",
+          "page": "login"
+        },
+        {
+          "kind": "act",
+          "description": "submit invalid or incomplete input",
+          "page": "login"
+        },
+        {
+          "kind": "assert",
+          "description": "a descriptive error message is displayed",
+          "page": "login"
+        },
+        {
+          "kind": "assert",
+          "description": "the user is not advanced to the next state",
+          "page": "login"
+        }
+      ]
+    },
+    {
+      "id": "full_purchase_flow_from_login_to_checkou_end_to_end",
+      "title": "Full purchase flow from login to checkout — end to end",
+      "description": "Exercise the full multi-page flow for: Full purchase flow from login to checkout",
+      "priority": "P1",
+      "markers": [
+        "e2e",
+        "regression"
+      ],
+      "pages": [
+        "login",
+        "checkout"
+      ],
+      "data_needs": [
+        "standard_user",
+        "backpack",
+        "valid_customer"
+      ],
+      "steps": [
+        {
+          "kind": "arrange",
+          "description": "navigate to the login page",
+          "page": "login"
+        },
+        {
+          "kind": "act",
+          "description": "log in with valid credentials",
+          "page": "login"
+        },
+        {
+          "kind": "act",
+          "description": "complete checkout with valid customer info",
+          "page": "checkout"
+        },
+        {
+          "kind": "assert",
+          "description": "the order confirmation is shown",
+          "page": "checkout"
+        },
+        {
+          "kind": "assert",
+          "description": "confirm the final success state persists",
+          "page": "checkout"
+        }
+      ]
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 **AI-Powered Hybrid Playwright Automation Framework**
 
-A production-ready test automation framework built with Python, Pytest, and Playwright — enhanced with 14 AI and modern-technology capabilities to help QA teams ship faster with greater confidence.
+A production-ready test automation framework built with Python, Pytest, and Playwright — enhanced with 15 AI and modern-technology capabilities to help QA teams ship faster with greater confidence.
 
 ---
 
@@ -37,7 +37,7 @@ It targets both **UI (browser)** and **API (REST contract)** layers from a singl
 
 ---
 
-## 14 AI & Modern Capabilities
+## 15 AI & Modern Capabilities
 
 | # | Capability | How to Activate |
 |---|---|---|
@@ -55,6 +55,42 @@ It targets both **UI (browser)** and **API (REST contract)** layers from a singl
 | 12 | **LLM Test Quality Auditor** | `python tools/audit_tests.py` |
 | 13 | **Auto Test Repair on CI Failure** | `python tools/repair_test.py` |
 | 14 | **Synthetic Test Data Generator** | `python tools/generate_data.py "description"` |
+| 15 | **Planner → Generator → Healer agent trio** | `python tools/agents_cli.py pipeline "feature"` |
+
+---
+
+## 🤖 AI Agents: Planner → Generator → Healer
+
+A cohesive, composable trio that authors and maintains tests as an autonomous loop.
+Each agent routes LLM calls through `utils/llm_client.py` **and ships a deterministic
+offline fallback**, so the agents — and the bundled `examples/` — run end-to-end with
+**no API key**. Set `OPENAI_API_KEY` in `config/.env` to switch to the richer LLM path;
+the calling code is identical (each agent reports its mode: `OFFLINE` / `LLM`).
+
+```
+ feature ─▶ Planner ─▶ TestPlan ─▶ Generator ─▶ pytest tests ─▶ (run) ─▶ Healer ─▶ diagnosis + fix
+```
+
+| Agent | Input | Output |
+|-------|-------|--------|
+| **Planner** | plain-English feature / user story | structured `TestPlan` (scenarios, priorities, markers, steps) → JSON |
+| **Generator** | one planned scenario | runnable pytest test wired to fixtures (+ Page Object stub if needed) |
+| **Healer** | pytest log / error + source | failure diagnosis + concrete fix (unified diff or guidance) |
+
+```bash
+# Plan a feature into scenarios
+python tools/agents_cli.py plan "User can add a product to the cart and check out"
+
+# End-to-end: plan → generate runnable tests (into tests/generated/)
+python tools/agents_cli.py pipeline "User can add a product to the cart and check out" --write
+HEADLESS=true pytest tests/generated -v          # the generated tests pass against SauceDemo
+
+# Heal a failing run (diagnose + propose fixes; add --apply to patch diffs)
+python tools/agents_cli.py heal --log examples/sample_pytest_failure.log
+```
+
+Runnable demos live in `examples/` (see `examples/README.md`); code and contribution
+rules live in `agents/` (see `agents/AGENTS_GUIDELINES.md`).
 
 ---
 
@@ -93,7 +129,23 @@ PlaySight/
 │   ├── test_data_generator.py  # AI-powered synthetic data generation
 │   └── llm_judge.py            # Test quality scoring (A–F grades)
 │
+├── agents/                     # 🤖 Planner → Generator → Healer trio
+│   ├── base_agent.py           # Shared LLM routing + offline fallback
+│   ├── schemas.py              # Pydantic contracts (TestPlan, Scenario, HealResult)
+│   ├── planner.py              # Feature → TestPlan
+│   ├── generator.py            # Scenario → pytest test
+│   ├── healer.py               # Failure → diagnosis + fix
+│   └── AGENTS_GUIDELINES.md    # Contribution rules for the agents
+│
+├── examples/                   # Runnable agent demos + sample inputs
+│   ├── 01_planner_demo.py
+│   ├── 02_generator_demo.py
+│   ├── 03_healer_demo.py
+│   ├── 04_full_pipeline_demo.py
+│   └── sample_pytest_failure.log
+│
 ├── tools/                      # CLI tools — run independently
+│   ├── agents_cli.py           # Planner/Generator/Healer CLI (plan|generate|heal|pipeline)
 │   ├── generate_test.py        # Natural language → pytest test
 │   ├── codegen_converter.py    # Playwright recording → POM class
 │   ├── prioritize_tests.py     # Git diff → pytest -k filter
