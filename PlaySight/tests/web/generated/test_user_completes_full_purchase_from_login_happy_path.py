@@ -9,6 +9,8 @@ import re
 import pytest
 from playwright.sync_api import expect
 
+pytestmark = pytest.mark.web
+
 
 @pytest.mark.smoke
 @pytest.mark.regression

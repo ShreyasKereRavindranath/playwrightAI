@@ -1,13 +1,21 @@
 """
-Central LLM client — all AI capabilities route through here.
+Central LLM client — backward-compatibility shim over the provider abstraction.
 
-Supports OpenAI-compatible APIs. Handles retries, missing key gracefully,
-and provides both plain-text and structured JSON completion modes.
+Historically this wrapped the OpenAI SDK directly. It now delegates to
+`llm.service.LLMService`, which routes to whichever provider the user selected
+(OpenAI, Anthropic, Gemini, Ollama, LM Studio, or a custom endpoint). The public
+surface — `complete`, `complete_json`, `available` — and the *non-raising*
+failure contract (return "" / {} on error) are preserved exactly, so every
+existing consumer (agents, ai_self_heal, ai_summary, llm_judge,
+test_data_generator) keeps working with no changes.
+
+New code should prefer `llm.service.get_service()` directly.
 """
 
-import json
 import logging
 from typing import Optional
+
+from llm.service import LLMService, get_service
 
 logger = logging.getLogger(__name__)
 
@@ -18,21 +26,11 @@ _SYSTEM_DEFAULT = (
 
 
 class LLMClient:
-    """Thin wrapper around OpenAI chat completions used by all AI features."""
+    """Thin, provider-agnostic client used by all AI features."""
 
-    def __init__(self):
-        from config.config import Config
-        self._api_key = Config.OPENAI_API_KEY
-        self._model = Config.AI_MODEL
-        self._max_tokens = Config.AI_MAX_TOKENS
-
-    def _client(self):
-        if not self._api_key:
-            raise EnvironmentError(
-                "OPENAI_API_KEY is not set. Set it in config/.env to use AI features."
-            )
-        from openai import OpenAI
-        return OpenAI(api_key=self._api_key)
+    def __init__(self, service: Optional[LLMService] = None):
+        # `service` is injectable for tests; defaults to the shared instance.
+        self._service = service or get_service()
 
     def complete(
         self,
@@ -42,18 +40,17 @@ class LLMClient:
         max_tokens: Optional[int] = None,
         temperature: float = 0.2,
     ) -> str:
-        """Return a plain-text LLM completion or empty string on failure."""
+        """Return a plain-text completion or empty string on failure."""
+        if not self.available:
+            return ""
         try:
-            response = self._client().chat.completions.create(
-                model=model or self._model,
-                messages=[
-                    {"role": "system", "content": system or _SYSTEM_DEFAULT},
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=max_tokens or self._max_tokens,
+            return self._service.complete_text(
+                prompt,
+                system=system or _SYSTEM_DEFAULT,
+                model=model,
+                max_tokens=max_tokens,
                 temperature=temperature,
             )
-            return response.choices[0].message.content.strip()
         except Exception as exc:
             logger.error("LLM completion failed: %s", exc)
             return ""
@@ -65,25 +62,20 @@ class LLMClient:
         model: Optional[str] = None,
     ) -> dict:
         """Return a parsed JSON dict from the LLM, or empty dict on failure."""
-        system_msg = (system or _SYSTEM_DEFAULT) + "\nAlways respond with valid JSON only — no markdown, no prose."
+        if not self.available:
+            return {}
         try:
-            response = self._client().chat.completions.create(
-                model=model or self._model,
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=self._max_tokens,
-                temperature=0.1,
-                response_format={"type": "json_object"},
+            return self._service.complete_json(
+                prompt, system=system or _SYSTEM_DEFAULT, model=model
             )
-            raw = response.choices[0].message.content.strip()
-            return json.loads(raw)
         except Exception as exc:
             logger.error("LLM JSON completion failed: %s", exc)
             return {}
 
     @property
     def available(self) -> bool:
-        """True if an API key is configured."""
-        return bool(self._api_key)
+        """True if the selected provider is configured and usable."""
+        try:
+            return self._service.available()
+        except Exception:
+            return False

@@ -6,6 +6,10 @@ This guide covers every capability in the framework: what it does, how to config
 
 ## Prerequisites
 
+> **Shortcut:** `./run.sh` (from `PlaySight/`) does all of the below for you —
+> creates the venv, installs dependencies on first launch, and opens the runner.
+> The manual steps are only needed if you want to run pytest directly.
+
 **One-time setup (run in your own terminal — not inside Claude Code):**
 
 ```bash
@@ -19,11 +23,19 @@ source .venv/bin/activate          # macOS/Linux
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Install Playwright browsers
+# 4. (Optional) Install Playwright browsers
+#    The framework auto-installs the required browser on first run, so this
+#    step is optional. Run it manually only if you want to pre-warm the cache
+#    or work fully offline:
 playwright install chromium
 # or for all browsers:
 playwright install
 ```
+
+> **Browsers install themselves.** You do **not** need to run `playwright install`
+> by hand — on the first `pytest` run the framework detects a missing browser
+> binary and downloads it automatically. See
+> [Automatic Browser Provisioning](#automatic-browser-provisioning) below.
 
 ---
 
@@ -32,7 +44,7 @@ playwright install
 ```bash
 cd hybrid_playwright_framework
 source .venv/bin/activate
-pytest tests/test_purchase_flow.py -v
+pytest tests/web/ -v
 ```
 
 This runs all 8 saucedemo.com E2E tests with:
@@ -51,6 +63,36 @@ cp config/.env.example config/.env
 ```
 
 The framework reads `.env` automatically on startup — no export needed.
+
+---
+
+## Automatic Browser Provisioning
+
+The framework installs the Playwright browser binary for you — there's no need to
+run `playwright install` manually. At the start of every `pytest` session, a
+`pytest_configure` hook (`tests/conftest.py` → `utils/browser_bootstrap.py`)
+checks whether the browser named by `BROWSER` is present, and downloads it only
+if it's missing.
+
+- **First run / fresh machine:** the missing browser is downloaded once, then the
+  run proceeds. No manual step.
+- **Normal runs:** the binary is detected as present — the check is a cheap
+  filesystem stat and adds no measurable overhead.
+- **Branded channels** (`BROWSER=chrome` or `msedge`) are skipped, since those
+  reuse the OS-installed browser.
+
+**Flags (in `config/.env`):**
+```ini
+AUTO_INSTALL_BROWSERS=true    # master switch (default true). Set false to opt out.
+INSTALL_BROWSER_DEPS=false    # also run `--with-deps` for OS libraries
+                              # (Linux/CI only; requires root).
+```
+
+> **CI tip:** on a fresh Linux runner set `INSTALL_BROWSER_DEPS=true` so the
+> system libraries Chromium needs are pulled in alongside the browser binary.
+>
+> **Offline / air-gapped:** set `AUTO_INSTALL_BROWSERS=false` and pre-install the
+> browser once with `playwright install chromium`.
 
 ---
 
@@ -90,7 +132,7 @@ FLAKINESS_THRESHOLD=0.15  # 15% failure rate = flagged as flaky
 from utils.flakiness_tracker import FlakinessTracker
 tracker = FlakinessTracker()
 print(tracker.get_flaky_tests())     # list of flaky test IDs
-print(tracker.get_stats("tests/test_purchase_flow.py::test_login_valid[chromium]"))
+print(tracker.get_stats("tests/web/test_purchase_flow.py::test_login_valid[chromium]"))
 ```
 
 Flaky tests are also printed to the console at the end of every pytest session.
@@ -167,7 +209,7 @@ Converts a plain-English scenario into a Page Object stub + pytest function.
 ```bash
 cd hybrid_playwright_framework
 python tools/generate_test.py "User cannot checkout with an empty cart"
-python tools/generate_test.py "Login fails with SQL injection" --page login --output tests/test_security.py
+python tools/generate_test.py "Login fails with SQL injection" --page login --output tests/web/test_security.py
 python tools/generate_test.py "Add item to cart and verify total" --page inventory --feature cart
 ```
 
@@ -192,7 +234,7 @@ python tools/codegen_converter.py recorded.py --page login
 python tools/codegen_converter.py recorded.py --page checkout --with-test
 ```
 
-Output: `pages/login_page.py` + (optionally) `tests/test_login.py`.
+Output: `pages/login_page.py` + (optionally) `tests/web/test_login.py`.
 
 ---
 
@@ -300,7 +342,7 @@ Metrics are stored in `logs_and_reports/performance.db` (SQLite).
 ```python
 from utils.performance import PerformanceCollector
 pc = PerformanceCollector()
-print(pc.get_trends("tests/test_purchase_flow.py::test_full_purchase_flow[chromium]"))
+print(pc.get_trends("tests/web/test_purchase_flow.py::test_full_purchase_flow[chromium]"))
 print(pc.get_run_summary("2026-06-26_14-07-55"))
 ```
 
@@ -318,7 +360,7 @@ Scores test files on assertion quality, independence, and coverage. Grades A–F
 python tools/audit_tests.py
 
 # Audit a single file
-python tools/audit_tests.py --file tests/test_purchase_flow.py
+python tools/audit_tests.py --file tests/web/test_purchase_flow.py
 
 # Save report
 python tools/audit_tests.py --output logs_and_reports/audit_report.json
@@ -385,6 +427,100 @@ Generated data can be loaded in tests via the `e2e_data` fixture or `load_test_d
 
 ---
 
+## Capability 15 — PlaySight Studio (unified runner)
+
+A Cypress-style local UI for **functional + load tests, analytics, compare, and
+LLM config**. Light/dark **theme toggle**, a live **top-bar status strip**
+(green/red dots + tooltips for mock server, active runs, LLM, background
+processes), inline **error toasts**, and **graceful shutdown** (Ctrl-C stops
+everything it started). Formerly "Load Runner"; `tools/load_runner.py` remains a
+compatible alias.
+
+**Launch:**
+```bash
+python tools/studio.py serve      # → http://127.0.0.1:8770   (or ./run.sh)
+```
+
+**Functional mode** — run the pytest suites from the browser:
+- Pick any **api / web / mobile** tests from a **collapsible tree** (whole layer,
+  a file, or individual tests).
+- Set the **target per run**: BASE_URL for web/mobile; API target = mock (auto-start) /
+  public (restful-booker) / custom URL; mobile **device** and **markers** as
+  dropdowns; browser; headless.
+- Watch live pass/fail counts + per-test results; open or **download** HTML +
+  JUnit + JSON + Allure under `logs_and_reports/functional_runs/<run_id>/`. Every
+  report embeds who ran it, browser, OS, and a timezone-aware timestamp.
+
+**Load mode** — Locust load/soak/spike/stress + non-destructive security probes:
+- **6 load profiles:** smoke, load, stress, spike, soak, breakpoint (+ Custom).
+- **3 scenarios:** API CRUD (full create/read/update/patch/delete), a full
+  user journey, and security probes.
+- **Custom VU control:** run any scenario at any scale via the slider / fields.
+- **Reports on every run:** HTML + JUnit + JSON + Allure under
+  `logs_and_reports/load_runs/<run_id>/`.
+- **Auto-target:** starts the bundled mock API (`:8765`) automatically.
+
+**Headless (CI):**
+```bash
+python tools/studio.py run --scenario crud --profile smoke
+python tools/studio.py run --scenario journey --profile custom --users 200 --duration 300
+```
+Exits non-zero when the profile's thresholds are breached, so it gates CI.
+
+**CI workflows** live in `.github/workflows/` at the **repo root** (one level above
+`PlaySight/`); each job runs with `working-directory: PlaySight`. They are:
+`pr-checks.yml` (PR gate), `load-manual.yml` (on-demand, any scale),
+`nightly-soak.yml` (scheduled soak).
+
+📖 **Full guide:** [LOAD_TESTING.md](LOAD_TESTING.md)
+
+---
+
+## Capability 16 — Analytics Dashboard
+
+A read-only, PowerBI-style dashboard over your run history. It's **merged into
+PlaySight Studio** (the *Analytics* and *Compare Runs* tabs) and also runs
+standalone:
+
+**Launch:**
+```bash
+python tools/dashboard.py               # → http://127.0.0.1:8766
+```
+
+Pages: **Overview** (pass-rate & run trends), **Flakiness**, **Performance**
+(Web Vitals), **Run History**, **API Contracts**, and **Load Tests** — the last
+shows every load run's throughput/p95 with one-click links to its HTML, JSON,
+JUnit, and **Allure** reports (Allure is generated on demand; needs the `allure`
+CLI). Data is read from `logs_and_reports/flakiness.db`, `runs/*.json`, and
+`load_runs/*/results.json` — no configuration required.
+
+---
+
+## Capability 17 — Multi-Provider LLM
+
+Every AI feature runs through one provider-neutral layer, so you can use
+**OpenAI, Anthropic Claude, Google Gemini, Ollama (local), LM Studio (local), or
+any OpenAI-compatible endpoint** — chosen from the UI or CLI, remembered, and
+switchable anytime. Local providers need no API key; Ollama auto-installs,
+auto-starts, and auto-pulls its model on first use.
+
+**Pick a provider:**
+```bash
+python tools/llm_config.py list            # providers + live status
+python tools/llm_config.py select ollama   # switch (remembered)
+# or in the runner UI:  python tools/studio.py serve → "AI Provider" tab
+# or set AI_PROVIDER=<name> in config/.env
+```
+
+Only the selected provider's credentials are required (`OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, …). Unsupported features (e.g. embeddings
+on Anthropic, temperature on current Claude models) are disabled gracefully
+rather than failing.
+
+📖 **Full guide:** [LLM_PROVIDERS.md](LLM_PROVIDERS.md)
+
+---
+
 ## AI Summary in HTML Report
 
 At the end of every run, an LLM executive summary is injected into the HTML report.
@@ -413,8 +549,15 @@ pytest -m smoke -v
 # Regression tests
 pytest -m regression -v
 
-# UI tests (exclude API)
-pytest tests/test_purchase_flow.py -v
+# Web UI tests (desktop) — by folder or marker
+pytest tests/web/ -v
+pytest -m web -v
+
+# Mobile UI tests (device emulation)
+pytest tests/mobile/ -v
+pytest -m mobile -v
+# pick a device:
+MOBILE_DEVICE="iPhone 13" pytest tests/mobile/ -v
 
 # API contract tests only
 pytest tests/api/ -v
@@ -436,6 +579,8 @@ allure serve logs_and_reports/allure-results
 | `ModuleNotFoundError: greenlet` or `pydantic-core` | Python 3.14 not supported. Use Python 3.11: `python3.11 -m venv .venv` |
 | `PermissionError: [Errno 1] Operation not permitted` on rerunfailures | Already fixed: `-p no:rerunfailures` in `pytest.ini` |
 | Browser fails to launch in sandboxed terminal | Run tests from your own terminal, not inside Claude Code |
+| Auto browser-install fails (proxy/offline) | Set `AUTO_INSTALL_BROWSERS=false`, then run `playwright install chromium` manually in a clean terminal |
+| Chromium missing OS libs on Linux/CI | Set `INSTALL_BROWSER_DEPS=true` (runs `--with-deps`; needs root) |
 | `pip install` gets a 403/proxy error | Open a fresh terminal without `HTTP_PROXY` set, then run pip |
 | Screenshot warning `Target page ... has been closed` | Fixed: screenshots now taken in `makereport(when="call")` hook |
 | axe-core `net::ERR_NAME_NOT_RESOLVED` | Offline? Save `axe.min.js` locally: `curl -o utils/axe.min.js <CDN URL>` |
@@ -459,12 +604,18 @@ hybrid_playwright_framework/
 │   └── checkout_page.py
 ├── tests/
 │   ├── conftest.py             ← all fixtures + capability hooks
-│   ├── test_purchase_flow.py   ← E2E saucedemo.com tests
+│   ├── web/                    ← browser UI tests (desktop)
+│   │   ├── test_purchase_flow.py   ← E2E saucedemo.com tests
+│   │   └── generated/          ← Generator agent output (web tests)
+│   ├── mobile/                 ← browser UI tests (mobile emulation)
+│   │   ├── conftest.py         ← mobile device context override
+│   │   └── test_mobile_shopping.py
 │   └── api/
 │       ├── conftest.py         ← API session/auth fixtures
 │       └── test_api_contracts.py ← Pydantic contract tests
 ├── utils/
 │   ├── llm_client.py           ← OpenAI wrapper
+│   ├── browser_bootstrap.py    ← auto-installs Playwright browsers
 │   ├── flakiness_tracker.py    ← SQLite flakiness DB
 │   ├── ai_self_heal.py         ← self-healing locators
 │   ├── visual_regression.py    ← perceptual hash diff
@@ -475,12 +626,25 @@ hybrid_playwright_framework/
 │   ├── test_data_generator.py  ← synthetic data gen
 │   └── llm_judge.py            ← test quality auditor
 ├── tools/
+│   ├── dashboard.py            ← analytics dashboard UI (:8766, Cap #16)
+│   ├── load_runner.py          ← test runner UI + CLI (:8770, Cap #15)
+│   ├── functional_engine.py    ← functional (pytest) test discovery + runner
+│   ├── mock_api_server.py      ← local mock API (full CRUD target)
 │   ├── generate_test.py        ← NL → test generator (Cap #5)
 │   ├── codegen_converter.py    ← codegen → POM (Cap #6)
 │   ├── prioritize_tests.py     ← change-impact prioritiser (Cap #9)
 │   ├── generate_data.py        ← data generator CLI (Cap #14)
 │   ├── audit_tests.py          ← LLM judge CLI (Cap #12)
-│   └── repair_test.py          ← auto repair CLI (Cap #13)
+│   ├── repair_test.py          ← auto repair CLI (Cap #13)
+│   └── agents_cli.py           ← plan/generate/heal agent CLI
+├── load/                       ← load testing (Cap #15)
+│   ├── catalog.py              ← scenarios, profiles, load-plan math
+│   ├── shapes.py               ← Locust LoadTestShape (6 profiles)
+│   ├── locustfile.py           ← CRUD / journey / security scenarios
+│   ├── reporting.py            ← JSON + JUnit + Allure writers
+│   └── engine.py               ← launch Locust, stream stats, reports
+├── agents/                     ← planner / generator / healer agents
+├── run.sh                      ← one-command launcher (venv + deps + serve)
 ├── data/
 │   ├── e2e_test_data.json      ← E2E test data
 │   └── visual_baselines/       ← auto-created baseline PNGs
@@ -490,8 +654,14 @@ hybrid_playwright_framework/
 │   ├── videos/run_*/           ← per-run videos
 │   ├── a11y/run_*/             ← axe-core JSON reports
 │   ├── visual_diffs/run_*/     ← diff images
+│   ├── load_runs/<id>/         ← per load-run html/junit/json/allure
+│   ├── functional_runs/<id>/   ← per functional-run html/junit/json/allure
 │   ├── flakiness.db            ← flakiness SQLite database
 │   └── performance.db          ← performance SQLite database
 ├── requirements.txt
 └── pytest.ini
 ```
+
+> **CI lives one level up**, at the repository root: `../.github/workflows/`
+> (`PlaywrightFramework/.github/workflows/`). Each job sets
+> `working-directory: PlaySight` so the steps run against this framework.

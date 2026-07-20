@@ -108,7 +108,7 @@ def main():
             max_tokens=600,
         )
         print(test_code)
-        test_dest = Path(f"tests/test_{page_name}.py")
+        test_dest = Path(f"tests/web/test_{page_name}.py")
         if not test_dest.exists():
             test_dest.write_text(test_code)
             print(f"\n✅ Smoke test written to {test_dest}")

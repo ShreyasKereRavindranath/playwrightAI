@@ -39,12 +39,12 @@ python tools/agents_cli.py heal --log examples/sample_pytest_failure.log
 
 ## Running the generated tests
 
-Generated tests land in `tests/generated/` and use the framework's real fixtures
+Generated tests land in `tests/web/generated/` and use the framework's real fixtures
 and page objects. They run against the configured `BASE_URL` (SauceDemo by default):
 
 ```bash
 python tools/agents_cli.py pipeline "User can add a product to the cart and check out" --write
-HEADLESS=true pytest tests/generated -v
+HEADLESS=true pytest tests/web/generated -v
 ```
 
 These three generated tests pass against the live SauceDemo app out of the box.

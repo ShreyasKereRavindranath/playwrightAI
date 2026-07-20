@@ -1,0 +1,50 @@
+name: Nightly Soak
+
+# Long-running reliability checks that don't belong on the PR path.
+# Runs every night at 02:30 UTC: a soak on both the CRUD and full-journey
+# scenarios, plus a security-probe soak. Durations are trimmed to be CI-friendly
+# (override by dispatching manually with your own values).
+
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "Soak duration in seconds"
+        required: false
+        default: "900"
+
+defaults:
+  run:
+    working-directory: PlaySight
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [crud, journey, security]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: PlaySight/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Soak — ${{ matrix.scenario }}
+        run: |
+          python tools/studio.py run \
+            --scenario ${{ matrix.scenario }} \
+            --profile soak \
+            --users 30 \
+            --duration ${{ github.event.inputs.duration || '900' }}
+      - name: Upload reports (html + junit + json + allure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-${{ matrix.scenario }}
+          path: PlaySight/logs_and_reports/load_runs/

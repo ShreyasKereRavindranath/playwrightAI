@@ -6,11 +6,19 @@ pytest-playwright==0.6.2
 pytest-xdist==3.6.1
 pytest-html==4.1.1
 pytest-rerunfailures==14.0
+locust==2.32.4
 python-dotenv==1.0.1
 allure-pytest==2.13.5
 requests==2.32.3
 pydantic==2.10.4
 openai==1.58.1
+# ── Multi-provider LLM support (all optional; each provider lazily imports its
+#    SDK, so a missing one just marks that provider unavailable) ──────────────
+anthropic>=0.40.0          # Anthropic Claude provider
+google-genai>=0.3.0        # Google Gemini provider
+keyring>=25.0.0            # optional secure credential storage
+# Ollama, LM Studio, and OpenAI-compatible providers use plain HTTP (requests) —
+# no extra SDK needed. langchain below is unused and kept only for compatibility.
 langchain==0.3.13
 langchain-openai==0.3.1
 Pillow==11.1.0

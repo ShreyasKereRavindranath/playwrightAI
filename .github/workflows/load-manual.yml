@@ -1,0 +1,57 @@
+name: Load Test (manual)
+
+# On-demand load run from the GitHub Actions "Run workflow" button.
+# Pick any scenario, any of the 6 profiles, and dial the virtual users /
+# duration to run at whatever scale you need — the same knobs as the UI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Test scenario"
+        type: choice
+        default: crud
+        options: [crud, journey, security]
+      profile:
+        description: "Load profile"
+        type: choice
+        default: load
+        options: [smoke, load, stress, spike, soak, breakpoint, custom]
+      users:
+        description: "Peak virtual users (blank = profile default)"
+        required: false
+        default: ""
+      duration:
+        description: "Duration in seconds (blank = profile default)"
+        required: false
+        default: ""
+
+defaults:
+  run:
+    working-directory: PlaySight
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: PlaySight/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run load test
+        run: |
+          ARGS="--scenario ${{ inputs.scenario }} --profile ${{ inputs.profile }}"
+          if [ -n "${{ inputs.users }}" ]; then ARGS="$ARGS --users ${{ inputs.users }}"; fi
+          if [ -n "${{ inputs.duration }}" ]; then ARGS="$ARGS --duration ${{ inputs.duration }}"; fi
+          echo "Running: python tools/studio.py run $ARGS"
+          python tools/studio.py run $ARGS
+      - name: Upload reports (html + junit + json + allure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-${{ inputs.scenario }}-${{ inputs.profile }}
+          path: PlaySight/logs_and_reports/load_runs/

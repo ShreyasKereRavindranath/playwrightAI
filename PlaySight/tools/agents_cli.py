@@ -153,7 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
     sg = sub.add_parser("generate", help="Plan/feature → test files")
     sg.add_argument("feature", nargs="?", default="")
     sg.add_argument("--plan", default="", help="Path to a saved TestPlan JSON")
-    sg.add_argument("--output-dir", default="tests/generated", help="Where to write test files")
+    sg.add_argument("--output-dir", default="tests/web/generated", help="Where to write test files")
     sg.add_argument("--write", action="store_true", help="Write files (default: dry run)")
     sg.add_argument("--overwrite", action="store_true", help="Overwrite existing files")
     sg.set_defaults(func=cmd_generate)
@@ -167,7 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     spl = sub.add_parser("pipeline", help="Feature → plan → generate")
     spl.add_argument("feature")
-    spl.add_argument("--output-dir", default="tests/generated")
+    spl.add_argument("--output-dir", default="tests/web/generated")
     spl.add_argument("--write", action="store_true")
     spl.add_argument("--overwrite", action="store_true")
     spl.set_defaults(func=cmd_pipeline)

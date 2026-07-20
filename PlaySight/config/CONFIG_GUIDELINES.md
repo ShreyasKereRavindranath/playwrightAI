@@ -17,6 +17,9 @@
 - Use `Config.validate()` in the session-scoped fixture to catch missing variables early
 - Keep `.env.example` up to date whenever a new `Config` attribute is added
 - Use clear prefix conventions: `TEST_USER_*` for credentials, `AI_*` for AI settings
+- Group related flags: browser provisioning (`AUTO_INSTALL_BROWSERS`,
+  `INSTALL_BROWSER_DEPS`), capabilities (`VISUAL_REGRESSION`, `ACCESSIBILITY_AUDIT`,
+  `PERFORMANCE_METRICS`, `FLAKINESS_TRACKING`), and notifications (`SLACK_*`)
 
 ### DO NOT:
 - Call `os.environ` or `os.getenv` directly in any file outside `config/config.py`
@@ -26,4 +29,4 @@
 
 ---
 
-> Last reviewed: 2026-06-26
+> Last reviewed: 2026-07-20

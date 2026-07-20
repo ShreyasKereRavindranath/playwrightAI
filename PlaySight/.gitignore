@@ -1,5 +1,7 @@
 # ── Secrets (never commit) ────────────────────────────────────────────────
 config/.env
+config/llm_providers.json
+config/llm_selection.json
 
 # ── Python ────────────────────────────────────────────────────────────────
 __pycache__/
@@ -17,6 +19,8 @@ logs_and_reports/videos/
 logs_and_reports/a11y/
 logs_and_reports/visual_diffs/
 logs_and_reports/runs/
+logs_and_reports/load_runs/
+logs_and_reports/functional_runs/
 logs_and_reports/*.log
 logs_and_reports/*.html
 logs_and_reports/*.db

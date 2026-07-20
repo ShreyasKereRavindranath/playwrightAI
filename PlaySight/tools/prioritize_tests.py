@@ -29,8 +29,8 @@ _PAGE_TO_TEST_MAP = {
     "pages/inventory_page": ["inventory", "purchase", "cart"],
     "pages/cart_page":      ["cart", "purchase"],
     "pages/checkout_page":  ["checkout", "purchase"],
-    "tests/test_login":     ["login"],
-    "tests/test_purchase":  ["purchase", "cart", "checkout"],
+    "tests/web/test_login":     ["login"],
+    "tests/web/test_purchase": ["purchase", "cart", "checkout"],
     "tests/api/":           ["api"],
 }
 

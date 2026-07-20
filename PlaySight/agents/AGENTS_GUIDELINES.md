@@ -58,7 +58,7 @@ agents/
 
 tools/agents_cli.py   → CLI: plan | generate | heal | pipeline
 examples/             → runnable demos + sample inputs
-tests/generated/      → Generator output (review before committing)
+tests/web/generated/      → Generator output (review before committing)
 logs_and_reports/plans/ → saved TestPlan JSON
 ```
 

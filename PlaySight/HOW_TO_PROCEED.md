@@ -25,6 +25,11 @@ python3 --version
 
 ## PHASE 1 — Environment Setup
 
+> **Fastest path:** from the `PlaySight/` directory, run **`./run.sh`**. It creates
+> the virtualenv, installs dependencies on first launch, and opens the Test Runner
+> UI at http://127.0.0.1:8770 — no other setup needed. The manual steps below are
+> for when you want to run pytest directly or understand each piece.
+
 ### Step 1.1 — Clone and Navigate
 ```bash
 git clone <your-repo-url>
@@ -51,7 +56,11 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### Step 1.4 — Install Playwright System Binaries
+### Step 1.4 — Install Playwright System Binaries (optional)
+> **Auto-install:** The framework downloads the required browser automatically on
+> the first `pytest` run (see `utils/browser_bootstrap.py` and the
+> `AUTO_INSTALL_BROWSERS` flag). The commands below are only needed if you want to
+> pre-warm the cache, install extra browsers, or work fully offline.
 ```bash
 # Download Chromium, Firefox, and WebKit browser binaries
 playwright install
@@ -90,10 +99,15 @@ Open `config/.env` and fill in:
 hybrid_playwright_framework/
 ├── config/          → Environment config loader, constants, browser settings
 ├── pages/           → Page Object Model classes (one file per application page/section)
-├── tests/           → Pytest test cases + conftest.py fixtures
-├── utils/           → Reusable helpers: logger, API client, screenshot util, AI self-healing
+├── tests/           → Pytest tests, split by layer:
+│   ├── api/         →   API-layer tests (no browser) — @pytest.mark.api
+│   ├── web/         →   Browser UI tests, desktop — @pytest.mark.web
+│   └── mobile/      →   Browser UI tests, device emulation — @pytest.mark.mobile
+├── load/            → Locust load-test scenarios, profiles, and run engine
+├── utils/           → Reusable helpers: logger, API client, browser bootstrap, AI self-healing
 ├── data/            → JSON / CSV test data files (parameterized inputs)
-└── logs_and_reports/→ Auto-generated: HTML reports, screenshots, Playwright traces
+├── tools/           → CLIs: dashboard (:8766), load_runner (:8770), generators, mock API
+└── logs_and_reports/→ Auto-generated: HTML/JUnit/Allure reports, screenshots, traces, load runs
 ```
 
 ### Design Layers (Hybrid Model)
@@ -188,7 +202,12 @@ pytest
 pytest -v
 
 # Run a specific test file
-pytest tests/test_login.py -v
+pytest tests/web/test_purchase_flow.py -v
+
+# Run a whole layer (by folder or marker)
+pytest tests/api -v          # or:  pytest -m api
+pytest tests/web -v          # or:  pytest -m web
+pytest tests/mobile -v       # or:  pytest -m mobile
 
 # Run tests matching a keyword
 pytest -k "login" -v
@@ -216,6 +235,29 @@ pytest -m smoke
 # Run only regression tests
 pytest -m regression
 ```
+
+### Step 4.5 — Test Runner (functional + load) & Dashboards
+
+The runner is a Cypress-style UI with two modes: **Functional** (run api/web/mobile
+pytest tests, pick the target per run) and **Load** (Locust profiles + VUs).
+
+```bash
+# One command — creates the venv (if needed), installs deps on first launch, opens the UI
+./run.sh                                     # → http://127.0.0.1:8770
+#   ↳ same as: python tools/studio.py serve
+
+# Headless load run (CI-friendly; exits non-zero on threshold breach)
+python tools/studio.py run --scenario crud --profile smoke
+
+# Analytics dashboard: pass rates, flakiness, performance, and load-run history
+python tools/dashboard.py                    # → http://127.0.0.1:8766
+```
+
+From the UI: **Functional Tests** tab → pick tests → set target → **Run**; or the
+**Load** tab → pick a scenario + profile → set VUs → **Run**. The Playwright browser
+auto-installs on the first web/mobile run and the mock API auto-starts on demand.
+
+See **`LOAD_TESTING.md`** for the full load/performance/security guide.
 
 ---
 

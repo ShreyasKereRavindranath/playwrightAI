@@ -7,7 +7,7 @@ stub + parametrized pytest test function, wired to conftest.py fixtures.
 
 Usage:
     python tools/generate_test.py "User cannot checkout with empty cart"
-    python tools/generate_test.py "Login fails with SQL injection" --page login --output tests/test_security.py
+    python tools/generate_test.py "Login fails with SQL injection" --page login --output tests/web/test_security.py
 """
 
 import argparse
@@ -45,7 +45,7 @@ _TEST_PROMPT = """
 Generate a pytest test function for the following scenario.
 
 Framework conventions:
-- File: tests/test_{feature}.py
+- File: tests/web/test_{feature}.py
 - Function name: test_{scenario_snake_case}
 - Uses @pytest.mark.smoke or @pytest.mark.regression
 - Structure: Arrange → Act → Assert
@@ -114,7 +114,7 @@ def main():
         )
         print(test_code)
 
-        output = args.output or f"tests/test_{feature}.py"
+        output = args.output or f"tests/web/test_{feature}.py"
         dest = Path(output)
         if not dest.exists():
             dest.parent.mkdir(parents=True, exist_ok=True)

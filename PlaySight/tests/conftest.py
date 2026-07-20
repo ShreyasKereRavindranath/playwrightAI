@@ -101,6 +101,17 @@ def _safe_name(nodeid: str, max_len: int = 120) -> str:
 
 # ── Session start ──────────────────────────────────────────────────────────
 
+def pytest_configure(config):
+    """
+    Ensure the required Playwright browser is installed before any test runs.
+    Runs once at collection start so users never need a manual
+    `playwright install`. Controlled by AUTO_INSTALL_BROWSERS in config/.env.
+    """
+    if Config.AUTO_INSTALL_BROWSERS:
+        from utils.browser_bootstrap import ensure_browser_installed
+        ensure_browser_installed(Config.BROWSER, with_deps=Config.INSTALL_BROWSER_DEPS)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _session_setup():
     _session_stats["start_time"] = time.monotonic()

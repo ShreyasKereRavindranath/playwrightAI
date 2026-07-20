@@ -8,18 +8,26 @@
 ## 1. WHAT THIS DIRECTORY CONTAINS
 
 The `tests/` directory contains all Pytest test cases, the shared `conftest.py` fixture
-module, and sub-directories organized by application module or feature.
+module, and sub-directories organized **by layer** — `api`, `web`, and `mobile`.
 
 ```
 tests/
 ├── conftest.py              → ALL shared fixtures (page objects, auth, test data)
-├── test_login.py            → Tests for authentication flows
-├── test_dashboard.py        → Tests for dashboard functionality
-├── <module>/                → Sub-directory for complex modules with many tests
-│   ├── conftest.py          → Module-scoped fixtures (optional, inherit root conftest)
-│   └── test_<feature>.py
+├── api/                     → API-layer tests (no browser) — @pytest.mark.api
+│   ├── conftest.py          → API session/auth fixtures
+│   └── test_api_contracts.py
+├── web/                     → Browser UI tests, desktop viewport — @pytest.mark.web
+│   ├── test_purchase_flow.py
+│   └── generated/           → Generator-agent output (review before committing)
+├── mobile/                  → Browser UI tests, mobile emulation — @pytest.mark.mobile
+│   ├── conftest.py          → mobile device context override (Playwright devices)
+│   └── test_mobile_shopping.py
 └── TEST_GUIDELINES.md       → This file
 ```
+
+> **Layer rule:** Put a new test in the folder that matches its layer (`api` / `web` /
+> `mobile`) and tag it with the matching marker (`pytestmark = pytest.mark.<layer>`),
+> so it can be selected by folder **or** marker.
 
 ---
 
@@ -158,8 +166,15 @@ def test_login_validation_errors(login_page, email, password, error):
 
 | Marker | Use Case |
 |--------|----------|
+| `@pytest.mark.api` | API-layer tests (no browser) — folder `tests/api/` |
+| `@pytest.mark.web` | Browser UI tests, desktop — folder `tests/web/` |
+| `@pytest.mark.mobile` | Browser UI tests, mobile emulation — folder `tests/mobile/` |
 | `@pytest.mark.smoke` | Critical path, run on every deploy |
 | `@pytest.mark.regression` | Full suite, run nightly or pre-release |
+| `@pytest.mark.e2e` | End-to-end multi-page user journeys |
+| `@pytest.mark.negative` | Negative / invalid-input scenarios |
+| `@pytest.mark.accessibility` | Accessibility (a11y) assertions |
+| `@pytest.mark.visual` | Visual-regression / screenshot comparison |
 | `@pytest.mark.slow` | Tests that take >30s; excluded from fast runs |
 | `@pytest.mark.skip(reason="...")` | Temporarily disabled — must include a reason |
 | `@pytest.mark.xfail(reason="...")` | Known failure; tracked in a ticket |
@@ -229,5 +244,5 @@ Before generating a test, an AI agent must confirm:
 
 ---
 
-> Last reviewed: 2026-06-26
+> Last reviewed: 2026-07-20
 > Owner: QA Automation Team

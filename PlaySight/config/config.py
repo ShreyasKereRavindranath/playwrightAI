@@ -22,6 +22,11 @@ class Config:
     HEADLESS: bool = os.getenv("HEADLESS", "true").lower() == "true"
     SLOW_MO: int = int(os.getenv("SLOW_MO", "0"))
     DEFAULT_TIMEOUT: int = int(os.getenv("DEFAULT_TIMEOUT", "30000"))
+    # Auto-provision the Playwright browser binary if missing (no manual
+    # `playwright install` needed). INSTALL_BROWSER_DEPS also pulls OS libs
+    # via `--with-deps` (Linux/CI; requires root).
+    AUTO_INSTALL_BROWSERS: bool = os.getenv("AUTO_INSTALL_BROWSERS", "true").lower() == "true"
+    INSTALL_BROWSER_DEPS: bool = os.getenv("INSTALL_BROWSER_DEPS", "false").lower() == "true"
     VIEWPORT_WIDTH: int = int(os.getenv("VIEWPORT_WIDTH", "1280"))
     VIEWPORT_HEIGHT: int = int(os.getenv("VIEWPORT_HEIGHT", "720"))
 
@@ -81,8 +86,21 @@ class Config:
         if not cls.TEST_USER_PASSWORD:
             missing.append("TEST_USER_PASSWORD")
         ai_features = [cls.ENABLE_AI_HEALING, cls.AI_SUMMARY]
-        if any(ai_features) and not cls.OPENAI_API_KEY:
-            missing.append("OPENAI_API_KEY (required when any AI feature is enabled)")
+        if any(ai_features):
+            # AI features now work with any configured provider (cloud or local),
+            # not just OpenAI. Validate the *selected* provider instead.
+            try:
+                from llm.service import get_service
+                result = get_service().validate()
+                if not result.ok:
+                    provider = get_service().current_provider_name()
+                    missing.append(
+                        f"LLM provider '{provider}' is not configured ({result.detail}). "
+                        "Set its API key, pick another provider via AI_PROVIDER, "
+                        "or use a local provider (ollama/lmstudio)."
+                    )
+            except Exception as exc:  # pragma: no cover - defensive
+                missing.append(f"LLM provider validation failed: {exc}")
         if cls.SLACK_NOTIFICATIONS and not cls.SLACK_WEBHOOK_URL:
             missing.append("SLACK_WEBHOOK_URL (required when SLACK_NOTIFICATIONS=true)")
         if missing:

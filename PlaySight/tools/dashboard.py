@@ -14,7 +14,9 @@ Usage:
 
 import argparse
 import json
+import shutil
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 
@@ -23,13 +25,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 try:
     import uvicorn
     from fastapi import FastAPI
-    from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.responses import HTMLResponse, JSONResponse, Response
 except ImportError:
     print("Missing dependencies. Run: pip install fastapi uvicorn[standard]")
     sys.exit(1)
 
 _DB   = Path("logs_and_reports/flakiness.db")
 _RUNS = Path("logs_and_reports/runs")
+_LOAD_RUNS = Path("logs_and_reports/load_runs")
 
 app = FastAPI(title="PlaySight Dashboard")
 
@@ -175,6 +178,97 @@ def api_contracts():
     return {"results": []}
 
 
+# ── Load-test endpoints ──────────────────────────────────────────────────────
+
+@app.get("/api/load")
+def api_load():
+    """Load-run summaries written by the Load Runner (logs_and_reports/load_runs/)."""
+    try:
+        from load.engine import list_runs
+        return list_runs(limit=50)
+    except Exception:
+        return []
+
+
+def _safe_load_dir(run_id: str):
+    """Resolve a load-run directory, guarding against path traversal."""
+    base = _LOAD_RUNS.resolve()
+    run_dir = (_LOAD_RUNS / run_id).resolve()
+    return run_dir if str(run_dir).startswith(str(base)) else None
+
+
+@app.get("/load_report/{run_id}", response_class=HTMLResponse)
+def load_report(run_id: str):
+    run_dir = _safe_load_dir(run_id)
+    path = run_dir / "report.html" if run_dir else None
+    if not path or not path.exists():
+        return HTMLResponse("<h3>Load report not found</h3>", status_code=404)
+    return HTMLResponse(path.read_text())
+
+
+@app.get("/load_file/{run_id}/{kind}")
+def load_file(run_id: str, kind: str):
+    mapping = {"json": ("results.json", "application/json"),
+               "junit": ("junit.xml", "application/xml")}
+    if kind not in mapping:
+        return JSONResponse({"error": "unknown file kind"}, status_code=400)
+    filename, media = mapping[kind]
+    run_dir = _safe_load_dir(run_id)
+    path = run_dir / filename if run_dir else None
+    if not path or not path.exists():
+        return JSONResponse({"error": "file not found"}, status_code=404)
+    return Response(content=path.read_text(), media_type=media)
+
+
+@app.get("/load_allure/{run_id}", response_class=HTMLResponse)
+def load_allure(run_id: str, refresh: int = 0):
+    """
+    One-click Allure report: generate a self-contained HTML report from the
+    run's allure-results on first view (cached thereafter; ?refresh=1 rebuilds),
+    then serve it inline. Requires the `allure` CLI on PATH.
+    """
+    run_dir = _safe_load_dir(run_id)
+    if not run_dir:
+        return HTMLResponse("<h3>Invalid run id</h3>", status_code=400)
+    results = run_dir / "allure-results"
+    if not results.exists() or not any(results.glob("*-result.json")):
+        return HTMLResponse("<h3>No Allure results for this run</h3>", status_code=404)
+
+    report = run_dir / "allure-report" / "index.html"
+    if refresh or not report.exists():
+        allure_bin = shutil.which("allure")
+        if not allure_bin:
+            return HTMLResponse(_allure_missing_html(run_id, results), status_code=503)
+        try:
+            subprocess.run(
+                [allure_bin, "generate", str(results), "--single-file", "--clean",
+                 "-o", str(run_dir / "allure-report")],
+                check=True, capture_output=True, timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            return HTMLResponse("<h3>Allure generation timed out</h3>", status_code=504)
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or b"").decode(errors="replace")[:1000]
+            return HTMLResponse(
+                f"<h3>Allure generation failed</h3><pre>{detail}</pre>", status_code=500)
+    if not report.exists():
+        return HTMLResponse("<h3>Allure report was not produced</h3>", status_code=500)
+    return HTMLResponse(report.read_text())
+
+
+def _allure_missing_html(run_id: str, results: Path) -> str:
+    return (
+        "<div style='font-family:system-ui;padding:40px;max-width:640px;margin:auto'>"
+        "<h2>⚠️ Allure CLI not found</h2>"
+        "<p>Install the Allure command-line tool to view reports in the browser:</p>"
+        "<pre>brew install allure        # macOS\n"
+        "# or: npm install -g allure-commandline</pre>"
+        "<p>Or view it directly without installing globally:</p>"
+        f"<pre>allure serve {results}</pre>"
+        f"<p>Then reload <a href='/load_allure/{run_id}'>this page</a>.</p></div>"
+    )
+
+
 # ── Run JSON loader ────────────────────────────────────────────────────────
 
 def _load_run_jsons() -> list:
@@ -305,6 +399,7 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:12px;color:#
     <div class="nav-sec">Data</div>
     <div class="nav-item" onclick="go('runs')"     id="n-runs">    <span class="nav-icon">🔄</span>Run History</div>
     <div class="nav-item" onclick="go('api')"      id="n-api">     <span class="nav-icon">🔌</span>API Contracts</div>
+    <div class="nav-item" onclick="go('load')"     id="n-load">    <span class="nav-icon">🚀</span>Load Tests</div>
   </nav>
   <div class="sb-footer">PlaySight v1.0 · Playwright + Python</div>
 </aside>
@@ -426,11 +521,46 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:12px;color:#
       <tbody id="tb-api"></tbody></table>
     </div>
   </div>
+
+  <!-- ═══════════════════════ LOAD TESTS ═══════════════════════ -->
+  <div class="page" id="p-load">
+    <div class="kpi-row" id="load-kpis"><div class="spin"></div></div>
+    <div class="grid-2">
+      <div class="chart-card">
+        <div class="ch"><div><div class="ct">Throughput per Run</div><div class="cs">Requests/s · last 15 load runs</div></div></div>
+        <div class="cw" style="height:240px"><canvas id="cLoadRps"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="ch"><div><div class="ct">p95 Response Time per Run</div><div class="cs">Milliseconds · last 15 load runs</div></div></div>
+        <div class="cw" style="height:240px"><canvas id="cLoadP95"></canvas></div>
+      </div>
+    </div>
+    <div class="grid-3">
+      <div class="chart-card">
+        <div class="ch"><div><div class="ct">Runs by Profile</div><div class="cs">smoke · load · stress · …</div></div></div>
+        <div class="cw" style="height:210px"><canvas id="cLoadProfile"></canvas></div>
+      </div>
+      <div class="chart-card" style="grid-column:span 2">
+        <div class="info-box" style="height:100%;display:flex;align-items:center">
+          🚀 Load runs are produced by the <strong>Load Runner</strong>:
+          <code>python tools/load_runner.py serve</code> (UI) or
+          <code>python tools/load_runner.py run --scenario crud --profile smoke</code> (CI).
+          Every run writes HTML · JUnit · JSON · Allure — all one click away below
+          (Allure needs the <code>allure</code> CLI). See <code>LOAD_TESTING.md</code>.
+        </div>
+      </div>
+    </div>
+    <div class="table-card">
+      <div class="th"><div class="tt">Load Run History</div></div>
+      <table><thead><tr><th>Run</th><th>Scenario</th><th>Profile</th><th>Requests</th><th>Fail %</th><th>Avg (ms)</th><th>p95 (ms)</th><th>RPS</th><th>Verdict</th><th>Reports</th></tr></thead>
+      <tbody id="tb-load"><tr><td colspan="10" style="text-align:center;padding:28px;color:var(--muted)"><div class="spin"></div></td></tr></tbody></table>
+    </div>
+  </div>
 </div>
 
 <script>
 const CH = {};
-const TITLES = {overview:'Overview',flaky:'Flakiness Tracker',perf:'Performance Metrics',runs:'Run History',api:'API Contracts'};
+const TITLES = {overview:'Overview',flaky:'Flakiness Tracker',perf:'Performance Metrics',runs:'Run History',api:'API Contracts',load:'Load & Performance'};
 
 function go(page) {
   document.querySelectorAll('.page').forEach(e => e.classList.remove('active'));
@@ -442,6 +572,7 @@ function go(page) {
   if (page === 'perf')  loadPerfPage();
   if (page === 'runs')  loadRunsPage();
   if (page === 'api')   loadApiPage();
+  if (page === 'load')  loadLoadPage();
 }
 
 function mkChart(id, cfg) {
@@ -700,6 +831,82 @@ async function loadApiPage() {
       const badge = t.status==='PASSED'?'<span class="badge bp">PASSED</span>':'<span class="badge bf">FAILED</span>';
       return `<tr><td style="font-size:12.5px">${t.name}</td><td>${badge}</td><td>${t.duration_s?t.duration_s.toFixed(2)+'s':'-'}</td><td style="font-size:12px;color:var(--muted)">${t.note||''}</td></tr>`;
     }).join('') : '<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--muted)">Run <code>pytest tests/api/ -v</code> to see results</td></tr>';
+  } catch(e){console.error(e)}
+}
+
+// ── Load tests page ───────────────────────────────────────────────────────
+function loadLabel(r){
+  const parts = (r.run_id||'').split('__');
+  const ts = (parts[0]||'').replace('_',' ').slice(5,16);  // MM-DD HH:MM
+  return `${ts} ${r.profile||''}`.trim();
+}
+
+async function loadLoadPage() {
+  try {
+    const runs = await fetch('/api/load').then(r=>r.json());
+    if (!runs.length) {
+      document.getElementById('load-kpis').innerHTML =
+        `<div style="grid-column:1/-1"><div class="empty"><div class="empty-icon">🚀</div><div class="empty-text">No load runs yet</div><div class="empty-sub">Run <code>python tools/load_runner.py serve</code> and launch a test</div></div></div>`;
+      ['cLoadRps','cLoadP95','cLoadProfile'].forEach(id=>{const el=document.getElementById(id);if(el)el.parentElement.style.display='none';});
+      document.getElementById('tb-load').innerHTML='<tr><td colspan="10" style="text-align:center;padding:28px;color:var(--muted)">No runs yet</td></tr>';
+      return;
+    }
+    const total = runs.length;
+    const passed = runs.filter(r=>r.passed).length;
+    const passRate = (passed/total*100);
+    const totalReq = runs.reduce((a,r)=>a+((r.summary||{}).total_requests||0),0);
+    const p95s = runs.map(r=>(r.summary||{}).p95_ms||0).filter(x=>x>0);
+    const avgP95 = p95s.length ? Math.round(p95s.reduce((a,b)=>a+b,0)/p95s.length) : 0;
+    const col = passRate>=90?'#22c55e':passRate>=70?'#f59e0b':'#ef4444';
+    document.getElementById('load-kpis').innerHTML = `
+      <div class="kpi purple"><div class="kpi-icon">🚀</div><div><div class="kv">${total}</div><div class="kl">Load Runs</div></div></div>
+      <div class="kpi green"><div class="kpi-icon">${passRate>=90?'🏆':'✅'}</div><div><div class="kv" style="color:${col}">${passRate.toFixed(1)}%</div><div class="kl">Pass Rate</div></div></div>
+      <div class="kpi blue"><div class="kpi-icon">📨</div><div><div class="kv">${totalReq.toLocaleString()}</div><div class="kl">Total Requests</div></div></div>
+      <div class="kpi amber"><div class="kpi-icon">⏱️</div><div><div class="kv">${avgP95}<span style="font-size:14px"> ms</span></div><div class="kl">Avg p95</div></div></div>
+    `;
+
+    // Chronological (oldest→newest) for the trend charts.
+    const chron = [...runs].reverse().slice(-15);
+    const L = chron.map(loadLabel);
+    ['cLoadRps','cLoadP95','cLoadProfile'].forEach(id=>{const el=document.getElementById(id);if(el)el.parentElement.style.display='';});
+    mkChart('cLoadRps',{type:'bar',
+      data:{labels:L,datasets:[{label:'Requests/s',data:chron.map(r=>(r.summary||{}).rps||0),backgroundColor:'rgba(59,130,246,.8)',borderRadius:4}]},
+      options:{...CHART_OPTS,plugins:{legend:{display:false}},
+        scales:{x:{ticks:{font:{size:9},maxRotation:45},grid:{display:false}},y:{ticks:{font:{size:11}},grid:{color:'#f0f4f8'}}}}});
+    mkChart('cLoadP95',{type:'line',
+      data:{labels:L,datasets:[{label:'p95 (ms)',data:chron.map(r=>(r.summary||{}).p95_ms||0),borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,.08)',fill:true,tension:.4,pointRadius:4}]},
+      options:{...CHART_OPTS,plugins:{legend:{display:false}},
+        scales:{x:{ticks:{font:{size:9},maxRotation:45},grid:{display:false}},y:{ticks:{callback:v=>v+'ms',font:{size:11}},grid:{color:'#f0f4f8'}}}}});
+
+    const byProfile = {};
+    runs.forEach(r=>{byProfile[r.profile||'?']=(byProfile[r.profile||'?']||0)+1;});
+    const COLS=['#3b82f6','#8b5cf6','#06b6d4','#22c55e','#f59e0b','#ec4899','#ef4444'];
+    mkChart('cLoadProfile',{type:'doughnut',
+      data:{labels:Object.keys(byProfile),datasets:[{data:Object.values(byProfile),backgroundColor:COLS.slice(0,Object.keys(byProfile).length),borderWidth:2,borderColor:'#fff'}]},
+      options:{responsive:true,maintainAspectRatio:false,cutout:'62%',plugins:{legend:{position:'bottom',labels:{font:{size:11},boxWidth:10,padding:10}}}}});
+
+    document.getElementById('tb-load').innerHTML = runs.map(r=>{
+      const su = r.summary||{};
+      const fr = su.fail_ratio!=null ? (su.fail_ratio*100) : 0;
+      const frCls = fr<=1?'bp':fr<=5?'bs':'bf';
+      const verdict = r.passed ? '<span class="badge bp">PASS</span>' : '<span class="badge bf">FAIL</span>';
+      return `<tr>
+        <td style="font-family:monospace;font-size:11.5px">${r.run_id||'-'}</td>
+        <td>${r.scenario||'-'}</td>
+        <td><span class="badge bb">${r.profile||'-'}</span></td>
+        <td>${(su.total_requests||0).toLocaleString()}</td>
+        <td><span class="badge ${frCls}">${fr.toFixed(1)}%</span></td>
+        <td>${su.avg_ms??'-'}</td>
+        <td>${su.p95_ms??'-'}</td>
+        <td>${su.rps??'-'}</td>
+        <td>${verdict}</td>
+        <td style="white-space:nowrap">
+          <a href="/load_report/${r.run_id}" target="_blank" style="color:var(--blue);text-decoration:none;font-weight:600">HTML</a> ·
+          <a href="/load_file/${r.run_id}/json" target="_blank" style="color:var(--blue);text-decoration:none;font-weight:600">JSON</a> ·
+          <a href="/load_file/${r.run_id}/junit" target="_blank" style="color:var(--blue);text-decoration:none;font-weight:600">JUnit</a> ·
+          <a href="/load_allure/${r.run_id}" target="_blank" style="color:var(--purple);text-decoration:none;font-weight:600">Allure</a>
+        </td></tr>`;
+    }).join('');
   } catch(e){console.error(e)}
 }
 

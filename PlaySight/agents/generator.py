@@ -40,6 +40,7 @@ Scenario (JSON):
 
 Framework conventions:
 - Import: `import re`, `import pytest`, `from playwright.sync_api import expect`.
+- Add `pytestmark = pytest.mark.web` at module level (these are browser UI tests).
 - The function receives page-object fixtures by name: {fixtures} plus `e2e_data` for data.
 - Available page objects and key methods:
     login_page:     navigate(); login(username, password); error_message (locator)
@@ -69,7 +70,7 @@ _FIXTURES = {
 class Generator(BaseAgent):
     """Scenario → GeneratedArtifact (test code, optional Page Object stub)."""
 
-    def generate(self, scenario: Scenario, output_dir: str = "tests/generated") -> GeneratedArtifact:
+    def generate(self, scenario: Scenario, output_dir: str = "tests/web/generated") -> GeneratedArtifact:
         # One file per scenario keyed on its stable id, so multiple scenarios in a
         # plan never overwrite each other.
         test_path = str(Path(output_dir) / f"test_{scenario.id}.py")
@@ -128,6 +129,8 @@ Review before committing — generated code is a starting point, not a final art
 import re
 import pytest
 from playwright.sync_api import expect
+
+pytestmark = pytest.mark.web
 
 
 {markers}
