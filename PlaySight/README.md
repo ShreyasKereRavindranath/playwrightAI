@@ -69,14 +69,18 @@ python tools/studio.py serve                 # → http://127.0.0.1:8770   (or .
 
 **Studio** is one UI for everything, with a **light/dark theme toggle**, a live
 **top-bar status strip** (green/red dots for the mock server, active runs, LLM
-provider, and background processes — hover for details), inline **error toasts**,
-and **graceful shutdown** (Ctrl-C stops every background process — mock servers,
-runs, ollama — nothing left hanging). Tabs:
+provider, each AI agent — planner · generator · healer — and background
+processes; hover for details), **auto-download toasts** (what was fetched and how
+much local disk it uses), inline **error toasts**, and **graceful shutdown**
+(Ctrl-C stops every background process — mock servers, runs, ollama — nothing
+left hanging). Tabs:
 
-- **Functional** — a collapsible api/web/mobile test tree; pick a whole layer, a
-  file, or individual tests; choose the target per run (BASE_URL; mock / public /
-  custom API; mobile **device** + **markers** as dropdowns; browser; headless);
-  watch live pass/fail; open or **download** HTML/JUnit/JSON/Allure.
+- **Functional** — a collapsible api/web/mobile test tree (**collapsed by
+  default**); pick a whole layer, a file, or individual tests; choose the target
+  per run (BASE_URL; mock / public / custom API; mobile **device** + **markers**
+  as dropdowns; browser; headless); watch live pass/fail; open or **download**
+  HTML/JUnit/JSON/Allure. Recent runs are labelled by test type (`WEB_` · `API_`
+  · `MOBILE_`).
 - **Load** — Locust scenarios at any scale, headless-CI friendly:
 
 ```bash
@@ -84,11 +88,14 @@ python tools/studio.py run --scenario crud --profile smoke   # exits non-zero on
 ```
 
 - **Analytics** — pass-rate/flakiness/perf trends (also standalone: `python tools/dashboard.py`).
-- **Compare Runs** — pick 2+ runs (load or functional) and compare metrics side by side.
+- **Compare Runs** — pick 2+ runs (load or functional) and compare metrics side by side (table scrolls horizontally).
 - **AI Provider** — pick the LLM provider (see below).
 
 Every run embeds **who ran it, browser, OS/version, and a timezone-aware timestamp**
-into its reports. Load scenarios: `crud` · `journey` · `security`. Profiles:
+into its reports, and each report is **titled by its test type** (e.g. `WEB_API_…`
+for functional, `LOAD_<scenario>_<profile>` for load). The active LLM provider and
+model are recorded too — or, when none is configured/active, a deterministic
+offline fallback. Load scenarios: `crud` · `journey` · `security`. Profiles:
 `smoke` · `load` · `stress` · `spike` · `soak` · `breakpoint` · `custom`.
 Full guide: **[LOAD_TESTING.md](LOAD_TESTING.md)**.
 

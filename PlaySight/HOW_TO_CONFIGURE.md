@@ -431,10 +431,11 @@ Generated data can be loaded in tests via the `e2e_data` fixture or `load_test_d
 
 A Cypress-style local UI for **functional + load tests, analytics, compare, and
 LLM config**. Light/dark **theme toggle**, a live **top-bar status strip**
-(green/red dots + tooltips for mock server, active runs, LLM, background
-processes), inline **error toasts**, and **graceful shutdown** (Ctrl-C stops
-everything it started). Formerly "Load Runner"; `tools/load_runner.py` remains a
-compatible alias.
+(green/red dots + tooltips for mock server, active runs, LLM, each AI agent —
+planner · generator · healer — and background processes), **auto-download toasts**
+(what was fetched + local disk used), inline **error toasts**, and **graceful
+shutdown** (Ctrl-C stops everything it started). Formerly "Load Runner";
+`tools/load_runner.py` remains a compatible alias.
 
 **Launch:**
 ```bash
@@ -442,14 +443,17 @@ python tools/studio.py serve      # → http://127.0.0.1:8770   (or ./run.sh)
 ```
 
 **Functional mode** — run the pytest suites from the browser:
-- Pick any **api / web / mobile** tests from a **collapsible tree** (whole layer,
-  a file, or individual tests).
+- Pick any **api / web / mobile** tests from a **collapsible tree** — **collapsed
+  by default** (whole layer, a file, or individual tests).
 - Set the **target per run**: BASE_URL for web/mobile; API target = mock (auto-start) /
   public (restful-booker) / custom URL; mobile **device** and **markers** as
   dropdowns; browser; headless.
 - Watch live pass/fail counts + per-test results; open or **download** HTML +
-  JUnit + JSON + Allure under `logs_and_reports/functional_runs/<run_id>/`. Every
-  report embeds who ran it, browser, OS, and a timezone-aware timestamp.
+  JUnit + JSON + Allure under `logs_and_reports/functional_runs/<run_id>/`. Recent
+  runs are labelled by test type (`WEB_` · `API_` · `MOBILE_`), and every report is
+  **titled by its test type** and embeds who ran it, browser, OS, a timezone-aware
+  timestamp, and the active LLM (or a deterministic offline fallback when none is
+  configured/active).
 
 **Load mode** — Locust load/soak/spike/stress + non-destructive security probes:
 - **6 load profiles:** smoke, load, stress, spike, soak, breakpoint (+ Custom).
@@ -457,7 +461,8 @@ python tools/studio.py serve      # → http://127.0.0.1:8770   (or ./run.sh)
   user journey, and security probes.
 - **Custom VU control:** run any scenario at any scale via the slider / fields.
 - **Reports on every run:** HTML + JUnit + JSON + Allure under
-  `logs_and_reports/load_runs/<run_id>/`.
+  `logs_and_reports/load_runs/<run_id>/`. The HTML report is **titled by load type**
+  (`LOAD_<scenario>_<profile>`) and carries a user/system/LLM context panel.
 - **Auto-target:** starts the bundled mock API (`:8765`) automatically.
 
 **Headless (CI):**

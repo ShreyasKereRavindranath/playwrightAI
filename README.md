@@ -2,38 +2,32 @@
 
 A hybrid **Playwright + Pytest** automation framework with AI assists, a full
 **load / performance / security** testing platform, and two web dashboards — all
-runnable locally with a single command.
-
-> **The framework lives in [`PlaySight/`](PlaySight/).** Run every command from
-> that directory (`cd PlaySight`). Full docs: **[PlaySight/README.md](PlaySight/README.md)**.
+runnable locally with no commands to memorise.
 
 - **UI tests** (Playwright) split by layer: `api` · `web` · `mobile`
 - **Load testing** (Locust): 6 profiles, custom virtual-user control, live dashboard
-- **Unified runner**: pick functional (api/web/mobile) *or* load tests from one UI
 - **Reports everywhere**: HTML · JUnit · JSON · Allure
 - **AI capabilities**: self-healing locators, NL→test generation, auto-repair, test-quality audit, run summaries — **pluggable across OpenAI · Anthropic · Gemini · Ollama · LM Studio · custom endpoints**
 - **CI ready**: GitHub Actions for PR checks, on-demand load, and nightly soaks
-- **Zero-friction**: dependencies, browsers, and the mock API all install/start themselves
+- **Zero-friction browsers**: the required browser auto-installs on first run
 
 ---
 
 ## Quick start
 
-**One command** — creates the virtualenv, installs everything on first launch, and
-opens the runner. Browsers and the mock API start themselves later from the UI:
+**One command** — creates the virtualenv, installs everything on first launch,
+and opens the runner. Browsers and the mock API start themselves later from the UI:
 
 ```bash
-cd PlaySight
 ./run.sh                    # → http://127.0.0.1:8770
 ```
 
-Open the URL, pick tests, hit **Run**. `./run.sh` also forwards args:
+That's it — open the URL, pick tests, hit **Run**. `./run.sh` also forwards args:
 `./run.sh serve --port 9100` or `./run.sh run --scenario crud --profile smoke`.
 
 <details><summary>No bash? Run the Python launcher directly</summary>
 
 ```bash
-cd PlaySight
 python3.11 -m venv .venv && source .venv/bin/activate   # once (Python 3.11)
 python tools/studio.py serve                       # → http://127.0.0.1:8770
 ```
@@ -44,7 +38,6 @@ auto-installs on the first web/mobile run; the mock API auto-starts on demand.
 <details><summary>Prefer to run pytest directly / set up manually?</summary>
 
 ```bash
-cd PlaySight
 python3.11 -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements.txt      # installs Playwright + Locust
@@ -56,8 +49,6 @@ pytest tests/web -v                  # browser auto-installs on first run
 ---
 
 ## Running tests
-
-_All commands run from `PlaySight/`._
 
 ```bash
 pytest                     # everything
@@ -73,26 +64,40 @@ Mobile device is configurable: `MOBILE_DEVICE="iPhone 13" pytest tests/mobile -v
 ## PlaySight Studio — the unified runner
 
 ```bash
-cd PlaySight && ./run.sh              # or: python tools/studio.py serve  → :8770
+python tools/studio.py serve                 # → http://127.0.0.1:8770   (or ./run.sh)
 ```
 
-One UI for everything, with a **light/dark theme toggle**, a live **top-bar status
-strip** (green/red dots + tooltips for the mock server, active runs, LLM provider,
-and background processes), inline **error toasts**, and **graceful shutdown**
-(Ctrl-C stops every background process — nothing left hanging). Tabs:
-**Functional** (collapsible api/web/mobile test tree; per-run target with device &
-marker dropdowns; live pass/fail; open or **download** reports), **Load** (Locust
-at any scale), **Analytics** & **Compare Runs** (trends + side-by-side), and
-**AI Provider**. Every run embeds who ran it, browser, OS, and a timezone-aware
-timestamp into its reports.
+**Studio** is one UI for everything, with a **light/dark theme toggle**, a live
+**top-bar status strip** (green/red dots for the mock server, active runs, LLM
+provider, each AI agent — planner · generator · healer — and background
+processes; hover for details), **auto-download toasts** (what was fetched and how
+much local disk it uses), inline **error toasts**, and **graceful shutdown**
+(Ctrl-C stops every background process — mock servers, runs, ollama — nothing
+left hanging). Tabs:
+
+- **Functional** — a collapsible api/web/mobile test tree (**collapsed by
+  default**); pick a whole layer, a file, or individual tests; choose the target
+  per run (BASE_URL; mock / public / custom API; mobile **device** + **markers**
+  as dropdowns; browser; headless); watch live pass/fail; open or **download**
+  HTML/JUnit/JSON/Allure. Recent runs are labelled by test type (`WEB_` · `API_`
+  · `MOBILE_`).
+- **Load** — Locust scenarios at any scale, headless-CI friendly:
 
 ```bash
-# Headless load run (exits non-zero if profile thresholds are breached)
-python tools/studio.py run --scenario crud --profile smoke
+python tools/studio.py run --scenario crud --profile smoke   # exits non-zero on breach
 ```
 
-Load scenarios: `crud` · `journey` · `security`. Profiles: `smoke` · `load` · `stress`
-· `spike` · `soak` · `breakpoint` · `custom`. Full guide: **[PlaySight/LOAD_TESTING.md](PlaySight/LOAD_TESTING.md)**.
+- **Analytics** — pass-rate/flakiness/perf trends (also standalone: `python tools/dashboard.py`).
+- **Compare Runs** — pick 2+ runs (load or functional) and compare metrics side by side (table scrolls horizontally).
+- **AI Provider** — pick the LLM provider (see below).
+
+Every run embeds **who ran it, browser, OS/version, and a timezone-aware timestamp**
+into its reports, and each report is **titled by its test type** (e.g. `WEB_API_…`
+for functional, `LOAD_<scenario>_<profile>` for load). The active LLM provider and
+model are recorded too — or, when none is configured/active, a deterministic
+offline fallback. Load scenarios: `crud` · `journey` · `security`. Profiles:
+`smoke` · `load` · `stress` · `spike` · `soak` · `breakpoint` · `custom`.
+Full guide: **[LOAD_TESTING.md](LOAD_TESTING.md)**.
 
 ## Dashboards
 
@@ -106,32 +111,29 @@ python tools/dashboard.py            # standalone analytics (also merged in Stud
 ## Project layout
 
 ```
-PlaywrightFramework/          ← repo root
-├── .github/workflows/        → CI (pr-checks · load-manual · nightly-soak)
-├── README.md                 → this file
-└── PlaySight/                → the framework (run everything from here)
-    ├── config/   → configuration loader + .env
-    ├── pages/    → Page Object Model classes
-    ├── tests/    → api/ · web/ · mobile/ (+ shared conftest.py)
-    ├── load/     → Locust scenarios, profiles, run engine
-    ├── utils/    → logger, browser bootstrap, AI helpers, trackers
-    ├── tools/    → dashboard, load_runner, functional engine, mock API, generators
-    ├── data/     → JSON test data + visual baselines
-    ├── logs_and_reports/ → generated reports, screenshots, load & functional runs
-    └── run.sh    → one-command launcher
+config/   → configuration loader + .env
+pages/    → Page Object Model classes
+tests/    → api/ · web/ · mobile/ (+ shared conftest.py)
+load/     → Locust scenarios, profiles, run engine
+utils/    → logger, browser bootstrap, AI helpers, trackers
+tools/    → dashboard, load_runner, functional engine, mock API, generators
+data/     → JSON test data + visual baselines
+logs_and_reports/  → generated reports, screenshots, load & functional runs
+run.sh    → one-command launcher
+
+../.github/workflows/ → CI, at the repo root (pr-checks · load-manual · nightly-soak)
 ```
 
 ## Documentation
 
 | Doc | What it covers |
 |-----|----------------|
-| [PlaySight/README.md](PlaySight/README.md) | Full project readme |
-| [PlaySight/HOW_TO_PROCEED.md](PlaySight/HOW_TO_PROCEED.md) | Onboarding: setup → architecture → building tests |
-| [PlaySight/HOW_TO_CONFIGURE.md](PlaySight/HOW_TO_CONFIGURE.md) | Every capability, its config flags, and run commands |
-| [PlaySight/LOAD_TESTING.md](PlaySight/LOAD_TESTING.md) | Load runner, profiles, scenarios, reports, CI |
-| [PlaySight/LLM_PROVIDERS.md](PlaySight/LLM_PROVIDERS.md) | Multi-provider LLM layer: providers, config, local setup, extending |
-| [PlaySight/DO_NOT_DO.md](PlaySight/DO_NOT_DO.md) | Anti-patterns to avoid |
-| `PlaySight/*/*_GUIDELINES.md` | Layer-specific rules (tests, pages, config, utils, data, agents) |
+| [HOW_TO_PROCEED.md](HOW_TO_PROCEED.md) | Onboarding: setup → architecture → building tests |
+| [HOW_TO_CONFIGURE.md](HOW_TO_CONFIGURE.md) | Every capability, its config flags, and run commands |
+| [LOAD_TESTING.md](LOAD_TESTING.md) | Load runner, profiles, scenarios, reports, CI |
+| [LLM_PROVIDERS.md](LLM_PROVIDERS.md) | Multi-provider LLM layer: providers, config, local setup, extending |
+| [DO_NOT_DO.md](DO_NOT_DO.md) | Anti-patterns to avoid |
+| `*/‌*_GUIDELINES.md` | Layer-specific rules (tests, pages, config, utils, data, agents) |
 
 ---
 
@@ -147,8 +149,11 @@ PlaywrightFramework/          ← repo root
 
 ## License & Contributing
 
-Open source under the **[MIT License](LICENSE)** — free for anyone to use, fork,
-modify, and ship in their own projects.
+PlaySight is open source under the **[MIT License](LICENSE)** — free for anyone to
+use, fork, modify, and ship in their own projects (a copyright/permission notice is
+all that's asked).
 
-If it helps you: **⭐ star the repo, 🍴 fork it, and 🙌 contribute** — improvements,
-bug reports, and constructive critique are welcome via issues and pull requests.
+If it's useful to you: **⭐ star the repo, 🍴 fork it for your own project, and 🙌
+contribute** — improvements, bug reports, and constructive critique are all
+welcome via issues and pull requests. See the layer `*_GUIDELINES.md` docs for
+conventions before submitting a PR.

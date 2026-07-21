@@ -35,9 +35,22 @@ _ROOT = Path(__file__).resolve().parent.parent
 _RUNS_DIR = _ROOT / "logs_and_reports" / "functional_runs"
 
 LAYERS = ("api", "web", "mobile")
+# Human-facing prefix token per layer, used in report titles and the run history.
+_LAYER_PREFIX = {"api": "API_", "web": "WEB_", "mobile": "MOBILE_"}
 _STATUS_RE = re.compile(r"\b(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b")
 _PCT_RE = re.compile(r"\[\s*(\d+)%\]")
 _RUN_TIMEOUT_S = 1800  # hard cap so a hung browser test can't run forever
+
+
+def layers_for(selection: list[str]) -> list[str]:
+    """The layers (api/web/mobile) a selection touches, in canonical order."""
+    return [layer for layer in LAYERS
+            if any(n.startswith(f"tests/{layer}") for n in selection)]
+
+
+def type_prefix(selection: list[str]) -> str:
+    """Concatenated type prefix for a selection, e.g. 'WEB_API_' (or '' if none)."""
+    return "".join(_LAYER_PREFIX[layer] for layer in layers_for(selection))
 
 
 # ── Discovery ────────────────────────────────────────────────────────────────
@@ -203,6 +216,10 @@ class FunctionalRunner:
     def _run(self, selection: list[str], target: dict, run_dir: Path):
         try:
             env, self._mock = _build_env(selection, target, self._log)
+            # Type prefix (WEB_/API_/MOBILE_) drives the report title + run history.
+            prefix = type_prefix(selection)
+            report_title = f"{prefix}Functional Report — {self.state['run_id']}"
+            env["PLAYSIGHT_REPORT_TITLE"] = report_title
             # Capture who/where/when + the user's selections for the reports.
             ctx = run_context.capture({
                 "browser": target.get("browser"),
@@ -280,6 +297,8 @@ class FunctionalRunner:
         summary = {
             "run_id": self.state["run_id"],
             "selection": self.state["selection"],
+            "types": layers_for(self.state["selection"]),
+            "type_prefix": type_prefix(self.state["selection"]),
             "target": target,
             "context": self.state.get("context", {}),
             "counts": {k: junit[k] for k in ("tests", "passed", "failed", "skipped", "errors")},

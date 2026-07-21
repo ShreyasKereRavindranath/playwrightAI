@@ -397,14 +397,19 @@ def api_status():
     except Exception as exc:
         llm = {"provider": "?", "availability": "error", "detail": str(exc), "model": ""}
     agents_ready = llm.get("availability") == "available"
+    # Every agent shares the same LLM; when it's unavailable they still work via
+    # their deterministic offline fallback (degraded, not broken → warn dot).
+    agent_names = ["planner", "generator", "healer"]
+    agent_mode = "llm" if agents_ready else "offline"
     return {
         "load": {"status": load_state.get("status", "idle"), "run_id": load_state.get("run_id"),
                  "error": load_state.get("error")},
         "functional": {"status": func_state.get("status", "idle"),
                        "run_id": func_state.get("run_id"), "error": func_state.get("error")},
         "llm": llm,
-        "agents": {"ready": agents_ready, "mode": "llm" if agents_ready else "offline",
-                   "names": ["planner", "generator", "healer"]},
+        "agents": {"ready": agents_ready, "mode": agent_mode, "names": agent_names,
+                   "items": [{"name": n, "ready": agents_ready, "mode": agent_mode}
+                             for n in agent_names]},
         "processes": process_registry.active(),
     }
 
@@ -696,6 +701,10 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);displ
 .ct{font-size:14px;font-weight:600;margin-bottom:12px}
 .cw{position:relative;height:230px}
 .table-card{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden;margin-bottom:18px}
+/* horizontal scroll for wide tables (e.g. Compare with many run columns) */
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.table-scroll .cmp-table{min-width:max-content}
+.table-scroll .cmp-table th,.table-scroll .cmp-table td{white-space:nowrap}
 .th{padding:14px 18px;border-bottom:1px solid var(--border);font-size:14px;font-weight:600}
 table{width:100%;border-collapse:collapse}
 th{padding:9px 16px;text-align:left;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);background:var(--surface2);border-bottom:1px solid var(--border)}
@@ -807,7 +816,7 @@ code{background:var(--surface2);padding:2px 6px;border-radius:4px;font-size:12px
             <option value="chromium">chromium</option><option value="firefox">firefox</option><option value="webkit">webkit</option>
           </select></div>
         <div class="field"><label>Headless<span class="info" title="Run without a visible browser window (recommended). Uncheck to watch the browser during web/mobile tests.">i</span></label>
-          <label class="cbox" style="height:38px"><input type="checkbox" id="f-headless" checked> Hide browser window</label></div>
+          <label class="cbox" style="display:flex;align-items:center;gap:8px;width:100%;height:38px;padding:0 11px;border:1px solid var(--border);border-radius:8px;background:var(--card);white-space:nowrap;overflow:hidden"><input type="checkbox" id="f-headless" checked style="flex:none;width:16px;height:16px;margin:0"> Hide browser window</label></div>
       </div>
       <div class="actions">
         <button class="btn btn-run" id="f-run-btn" onclick="startFunctional()">▶ Run selected</button>
@@ -956,7 +965,9 @@ code{background:var(--surface2);padding:2px 6px;border-radius:4px;font-size:12px
           <a href="#" onclick="downloadCompare('html');return false" class="report-link">⬇ HTML</a>
         </span>
       </div>
-      <table><thead id="cmp-head"></thead><tbody id="cmp-body"><tr><td class="empty">Select 2+ runs above</td></tr></tbody></table>
+      <div class="table-scroll">
+        <table class="cmp-table"><thead id="cmp-head"></thead><tbody id="cmp-body"><tr><td class="empty">Select 2+ runs above</td></tr></tbody></table>
+      </div>
     </div>
   </div>
 </div>
@@ -1030,6 +1041,7 @@ async function poll(){
   $('stop-btn').style.display=['starting','running'].includes(s.status)?'inline-block':'none';
   if(s.log) $('log').innerHTML=s.log.map(l=>`<div>${l}</div>`).join('');
   $('log').scrollTop=$('log').scrollHeight;
+  scanAutoDownloads(s.log, 'Load run');
 
   const series=s.series||[]; const last=series[series.length-1]||{};
   $('k-vus').textContent=last.users??'–';
@@ -1117,6 +1129,9 @@ async function loadHistory(){
 
 // ── Functional mode ─────────────────────────────────────────────────────────
 const LAYER_ICON={api:'🔌',web:'🖥️',mobile:'📱'};
+// Test-type prefix tokens (also computed server-side; derived here for old runs).
+const TYPE_TOKEN={api:'API_',web:'WEB_',mobile:'MOBILE_'};
+function fRunTypes(sel){return ['api','web','mobile'].filter(l=>(sel||[]).some(s=>s.startsWith('tests/'+l)));}
 
 async function loadTests(){
   const d=await fetch('/api/tests').then(r=>r.json());
@@ -1124,7 +1139,7 @@ async function loadTests(){
   renderTree();
 }
 
-let COLLAPSED=new Set();  // layers the user collapsed
+let COLLAPSED=new Set(['api','web','mobile']);  // layers start collapsed by default
 
 function renderTree(){
   if(!TESTS){return;}
@@ -1187,6 +1202,7 @@ async function fpoll(){
   $('f-progress').style.width=(s.percent||0)+'%';
   if(s.log) $('f-log').innerHTML=s.log.map(l=>`<div>${escapeHtml(l)}</div>`).join('');
   $('f-log').scrollTop=$('f-log').scrollHeight;
+  scanAutoDownloads(s.log, 'Functional tests');
   drawFCases(s.cases||[]);
   drawFVerdict(s);
   if(['completed','failed','idle'].includes(s.status)){clearInterval(FPOLL);FPOLL=null;loadFHistory();}
@@ -1223,8 +1239,10 @@ async function loadFHistory(){
   const runs=await fetch('/api/functional/runs').then(r=>r.json());
   $('tb-fhistory').innerHTML=runs.length?runs.map(r=>{
     const c=r.counts||{}; const badge=r.passed?'<span class="badge bp">PASS</span>':'<span class="badge bf">FAIL</span>';
+    const types=(r.types&&r.types.length?r.types:fRunTypes(r.selection))
+      .map(t=>`<span class="badge bb" style="margin-right:4px">${TYPE_TOKEN[t]||t}</span>`).join('');
     return `<tr>
-      <td style="font-family:monospace;font-size:11.5px">${r.run_id}</td>
+      <td style="font-family:monospace;font-size:11.5px">${types}${r.run_id}</td>
       <td>${c.tests??'-'}</td><td style="color:var(--pass)">${c.passed??'-'}</td>
       <td style="color:var(--fail)">${c.failed??'-'}</td><td>${badge}</td>
       <td style="white-space:nowrap;font-size:11px">
@@ -1366,6 +1384,24 @@ function downloadCompare(fmt){
   URL.revokeObjectURL(a.href);
 }
 
+// ── Auto-download surfacing ──────────────────────────────────────────────────
+// When the framework auto-downloads something mid-run (e.g. a Playwright
+// browser), its log line carries the PLAYSIGHT-AUTODL marker with a
+// human-readable message including the local disk footprint. Surface each such
+// line as a toast in the active section — once per unique message.
+const SHOWN_DL=new Set();
+function scanAutoDownloads(log, section){
+  (log||[]).forEach(line=>{
+    const i=line.indexOf('PLAYSIGHT-AUTODL');
+    if(i<0) return;
+    const msg=line.slice(i+'PLAYSIGHT-AUTODL'.length).replace(/^[\s|]+/,'').trim();
+    if(!msg || SHOWN_DL.has(msg)) return;
+    SHOWN_DL.add(msg);
+    const done=/installed|used on disk/i.test(msg);
+    toast(`${section} — ${done?'download complete':'auto-downloading…'}`, msg, done?'ok':'info');
+  });
+}
+
 // ── Toasts + error surfacing ────────────────────────────────────────────────
 function toast(title, text, kind){
   const el=document.createElement('div'); el.className='toast '+(kind||'');
@@ -1408,11 +1444,17 @@ const RUN_DOT={idle:'',completed:'ok',failed:'bad',running:'busy',starting:'busy
 async function refreshStatuses(){
   let s; try{ s=await fetch('/api/status').then(r=>r.json()); }catch(_){ return; }
   const procs=(s.processes||[]).filter(p=>p.running);
+  // One status line per agent (planner · generator · healer), each with its own dot.
+  const agents=(s.agents&&s.agents.items)||[];
+  const agentItems=agents.map(a=>({
+    label:'🤖 '+a.name,
+    dot:a.ready?'ok':'warn',
+    tip:`agent ${a.name} — mode: ${a.mode}`+(a.ready?'':' (LLM offline → deterministic fallback)')}));
   const items=[
     {label:'Load', dot:RUN_DOT[s.load.status]||'', tip:`Load run: ${s.load.status}`+(s.load.error?` — ${s.load.error}`:'')},
     {label:'Functional', dot:RUN_DOT[s.functional.status]||'', tip:`Functional run: ${s.functional.status}`+(s.functional.error?` — ${s.functional.error}`:'')},
     {label:'LLM: '+s.llm.provider+(s.llm.model?' · '+s.llm.model:''), dot:AV_DOT[s.llm.availability]||'warn', tip:`${s.llm.availability} — ${s.llm.detail||''}`},
-    {label:'Agents', dot:(s.agents&&s.agents.ready)?'ok':'warn', tip:(s.agents?`${s.agents.names.join(' · ')} — mode: ${s.agents.mode}`:'agents')},
+    ...agentItems,
     {label:`Procs ${procs.length}`, dot:procs.length?'ok':'', tip: procs.length? procs.map(p=>`${p.label} (pid ${p.pid})`).join(', '):'no background processes'},
   ];
   $('statuses').innerHTML=items.map(i=>

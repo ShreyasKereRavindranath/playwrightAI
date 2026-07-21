@@ -38,15 +38,41 @@ def capture(extra: Optional[dict] = None) -> dict:
     }
     if extra:
         ctx.update({k: v for k, v in extra.items() if v is not None and v != ""})
-    # Best-effort: record the active LLM provider + model so it shows in reports.
+    # Record the *effective* LLM details for reports. If the selected provider
+    # isn't active/configured we don't advertise its broken details — we record
+    # the deterministic offline fallback the agents actually run on instead.
+    ctx.update(_llm_context())
+    return ctx
+
+
+# Details recorded when no LLM is active/configured. The agents (planner /
+# generator / healer) transparently fall back to their deterministic offline
+# implementations, so reports reflect *that* rather than an inactive provider.
+_FALLBACK_LLM = {
+    "llm_provider": "offline (deterministic fallback)",
+    "llm_model": "rule-based · no LLM",
+    "llm_active": "no",
+}
+
+
+def _llm_context() -> dict:
+    """Effective LLM (provider/model/active) details for a report.
+
+    Returns the selected provider + model only when it validates (configured and
+    active); otherwise returns the offline fallback details. Never raises.
+    """
     try:
         from llm.service import get_service
         svc = get_service()
-        ctx.setdefault("llm_provider", svc.current_provider_name())
-        ctx.setdefault("llm_model", svc.current_model())
+        if svc.validate().ok:
+            return {
+                "llm_provider": svc.current_provider_name(),
+                "llm_model": svc.current_model() or "(default)",
+                "llm_active": "yes",
+            }
     except Exception:
         pass
-    return ctx
+    return dict(_FALLBACK_LLM)
 
 
 def as_rows(ctx: dict) -> list[tuple[str, str]]:
@@ -58,7 +84,7 @@ def as_rows(ctx: dict) -> list[tuple[str, str]]:
         "browser": "Browser", "browser_version": "Browser version", "device": "Device",
         "target": "Target", "scenario": "Scenario", "profile": "Profile",
         "provider": "LLM provider", "selection": "Selected tests", "markers": "Markers",
-        "llm_provider": "LLM provider", "llm_model": "LLM model",
+        "llm_provider": "LLM provider", "llm_model": "LLM model", "llm_active": "LLM active",
     }
     rows = []
     for key, val in ctx.items():

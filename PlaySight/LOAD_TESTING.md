@@ -35,12 +35,14 @@ already answering there.
 The runner has a **Functional Tests** tab and a **Load** tab.
 
 **Functional** runs the pytest suites straight from the browser — pick any
-`api` / `web` / `mobile` tests (a whole layer, a file, or individual tests),
-choose the target per run (BASE_URL for web/mobile; mock / public / custom for
-API; plus mobile device, browser, headless, and an optional `-m` marker filter),
-hit **Run**, and watch live pass/fail with per-test results. Reports land in
-`logs_and_reports/functional_runs/<id>/` (HTML · JUnit · JSON · Allure). This is
-the "run any test against any specification" path.
+`api` / `web` / `mobile` tests (a whole layer, a file, or individual tests — the
+tree is **collapsed by default**), choose the target per run (BASE_URL for
+web/mobile; mock / public / custom for API; plus mobile device, browser, headless,
+and an optional `-m` marker filter), hit **Run**, and watch live pass/fail with
+per-test results. Reports land in `logs_and_reports/functional_runs/<id>/`
+(HTML · JUnit · JSON · Allure), each **titled by test type** (`WEB_`/`API_`/`MOBILE_`)
+and recent runs in the history are labelled the same way. This is the "run any
+test against any specification" path.
 
 **Load** is everything below — Locust virtual-user scenarios shaped by the 6
 profiles. The rest of this guide covers Load mode.
@@ -98,7 +100,7 @@ Each run writes to `logs_and_reports/load_runs/<run_id>/`:
 
 | Format | File | Notes |
 |--------|------|-------|
-| **HTML** | `report.html` | Locust's native interactive report. Open from the UI. |
+| **HTML** | `report.html` | Locust's native interactive report, **titled `LOAD_<scenario>_<profile>`** with a user/system/LLM context panel. Open from the UI. |
 | **JSON** | `results.json` | Machine-readable summary, thresholds, per-endpoint verdicts. |
 | **JUnit** | `junit.xml` | One `<testcase>` per endpoint — ingested by CI test reporters. |
 | **Allure** | `allure-results/` | `allure serve logs_and_reports/load_runs/<run_id>/allure-results` |

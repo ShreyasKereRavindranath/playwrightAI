@@ -23,6 +23,7 @@ Capabilities activated by env flags in config/.env:
 
 import json
 import logging
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -110,6 +111,18 @@ def pytest_configure(config):
     if Config.AUTO_INSTALL_BROWSERS:
         from utils.browser_bootstrap import ensure_browser_installed
         ensure_browser_installed(Config.BROWSER, with_deps=Config.INSTALL_BROWSER_DEPS)
+
+
+def pytest_html_report_title(report):
+    """Title the pytest-html report with the run's test-type prefix when set.
+
+    Studio's functional runner exports PLAYSIGHT_REPORT_TITLE (e.g.
+    ``WEB_API_Functional Report — <run_id>``) so reports are identifiable by the
+    type of test rather than a generic "report" + timestamp.
+    """
+    title = os.environ.get("PLAYSIGHT_REPORT_TITLE")
+    if title:
+        report.title = title
 
 
 @pytest.fixture(scope="session", autouse=True)

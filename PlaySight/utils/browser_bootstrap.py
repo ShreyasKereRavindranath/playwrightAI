@@ -31,6 +31,18 @@ _BRANDED_CHANNELS = {"chrome", "chrome-beta", "msedge", "msedge-beta", "msedge-d
 # Guard so we only probe once per Python process even if called repeatedly.
 _checked: set[str] = set()
 
+# Rough on-disk footprint of each Playwright browser bundle, surfaced to the UI
+# so users know how much space a one-time auto-download will occupy locally.
+_BROWSER_DISK_SIZE = {
+    "chromium": "~170 MB",
+    "firefox": "~85 MB",
+    "webkit": "~70 MB",
+}
+
+# Distinctive prefix so the Studio UI can spot an auto-download in the streamed
+# run log and surface it as a toast. Do NOT change without updating tools/studio.py.
+AUTODL_MARKER = "PLAYSIGHT-AUTODL"
+
 
 def _binary_present(browser: str) -> bool:
     """Return True if the browser executable Playwright would launch exists."""
@@ -56,6 +68,13 @@ def _run_install(browser: str, with_deps: bool) -> bool:
         cmd.append("--with-deps")
     cmd.append(browser)
 
+    size = _BROWSER_DISK_SIZE.get(browser, "a few hundred MB")
+    # UI-facing, parseable marker (streamed to the Studio run log → toast).
+    logger.warning(
+        "%s | Downloading Playwright '%s' browser — not installed yet. "
+        "This is a one-time download that will use %s of local disk.",
+        AUTODL_MARKER, browser, size,
+    )
     logger.warning(
         "Playwright browser '%s' not found — installing automatically (%s)…",
         browser, " ".join(cmd),
@@ -69,7 +88,10 @@ def _run_install(browser: str, with_deps: bool) -> bool:
             browser, exc, browser,
         )
         return False
-    logger.info("Playwright browser '%s' installed.", browser)
+    logger.info(
+        "%s | Playwright '%s' browser installed (%s used on disk).",
+        AUTODL_MARKER, browser, size,
+    )
     return True
 
 

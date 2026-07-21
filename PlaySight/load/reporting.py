@@ -15,13 +15,16 @@ without Locust or a live target.
 """
 
 import json
+import re
 import uuid
 import xml.etree.ElementTree as ET
+from html import escape
 from pathlib import Path
 from typing import Optional
 from xml.dom import minidom
 
 from load.catalog import PROFILES
+from utils import run_context
 
 AGGREGATED = "Aggregated"
 
@@ -206,6 +209,59 @@ def write_allure(run_dir: Path, meta: dict, verdict: dict) -> Path:
     return allure_dir
 
 
+# ── Run-context panel for the (native Locust) HTML report ────────────────────
+
+def inject_context_panel(run_dir: Path, meta: dict) -> Optional[Path]:
+    """Prepend a user/system/LLM context panel to the Locust HTML report.
+
+    Locust's native report.html has no notion of who/where/when a run happened,
+    so we splice in the captured run context (see utils.run_context). Best-effort
+    and idempotent — never raises, and skips if the report or context is absent.
+    """
+    report = Path(run_dir) / "report.html"
+    context = meta.get("context") or {}
+    if not report.exists() or not context:
+        return None
+    try:
+        html = report.read_text()
+    except OSError:
+        return None
+    if "playsight-context" in html:  # already injected
+        return report
+
+    # Prefix the report title with the load type (scenario/profile) instead of a
+    # generic Locust title, so reports are identifiable by what they tested.
+    scenario = meta.get("scenario", "load")
+    profile = meta.get("profile", "custom")
+    title = f"LOAD_{scenario}_{profile} — {meta.get('run_id', '')}".strip(" —")
+    html = re.sub(r"<title>.*?</title>", f"<title>{escape(title)}</title>", html,
+                  count=1, flags=re.DOTALL | re.IGNORECASE)
+
+    rows = "".join(
+        f"<tr><th style='text-align:left;padding:4px 12px 4px 0;color:#64748b;"
+        f"font-weight:600;white-space:nowrap'>{escape(label)}</th>"
+        f"<td style='padding:4px 0'>{escape(value)}</td></tr>"
+        for label, value in run_context.as_rows(context)
+    )
+    panel = (
+        "<section class='playsight-context' style=\"font-family:system-ui,-apple-system,"
+        "sans-serif;margin:16px;padding:16px 20px;border:1px solid #e2e8f0;border-radius:12px;"
+        "background:#f8fafc\">"
+        "<h3 style='margin:0 0 10px;font-size:14px;color:#1e293b'>🎭 PlaySight — Run context "
+        "<span style='font-weight:400;color:#64748b;font-size:12px'>(user · system · LLM)</span></h3>"
+        f"<table style='border-collapse:collapse;font-size:12.5px;color:#1e293b'>{rows}</table>"
+        "</section>"
+    )
+    if "<body>" in html:
+        html = html.replace("<body>", "<body>\n" + panel, 1)
+    elif "</body>" in html:
+        html = html.replace("</body>", panel + "\n</body>", 1)
+    else:
+        html = panel + html
+    report.write_text(html)
+    return report
+
+
 # ── Orchestration ────────────────────────────────────────────────────────────
 
 def write_reports(run_dir: Path, meta: dict, rows: list[dict]) -> dict:
@@ -216,4 +272,5 @@ def write_reports(run_dir: Path, meta: dict, rows: list[dict]) -> dict:
     write_json(run_dir, meta, rows, verdict)
     write_junit(run_dir, meta, verdict)
     write_allure(run_dir, meta, verdict)
+    inject_context_panel(run_dir, meta)  # user/system/LLM panel in the HTML report
     return verdict
