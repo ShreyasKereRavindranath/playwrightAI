@@ -1,12 +1,12 @@
 # Security Policy
 
-PlaySight ships load, performance, and **security** testing tooling, so we take
+Shreyzen ships load, performance, and **security** testing tooling, so we take
 the security of the project itself seriously. Thank you for helping keep it and
 its users safe.
 
 ## Supported Versions
 
-PlaySight is under active development. Security fixes are applied to the latest
+Shreyzen is under active development. Security fixes are applied to the latest
 `main` branch. Please make sure you're on the most recent version before
 reporting.
 

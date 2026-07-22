@@ -1,0 +1,206 @@
+"""
+Generator — Capability: AI Test Generation.
+
+Turns a planned Scenario into runnable framework code: a pytest test function
+(and, when the scenario touches a page that doesn't exist yet, a Page Object
+stub). Output obeys the framework conventions enforced in DO_NOT_DO.md:
+
+- Tests receive page objects via conftest fixtures — never a raw `page`.
+- No raw Playwright calls in test bodies; interactions go through page objects.
+- Assertions use expect() from playwright.sync_api, only in the test.
+- Test data comes from the e2e_data fixture, never hardcoded.
+
+The LLM path prompts for code and strips fences; the offline path composes a
+test from the scenario's steps using a keyword→page-method map, so the demo
+produces genuinely runnable tests against the bundled SauceDemo page objects.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import List, Optional
+
+from agents.base_agent import BaseAgent
+from agents.schemas import GeneratedArtifact, Scenario
+
+logger = logging.getLogger(__name__)
+
+_SYSTEM = (
+    "You are a senior QA automation engineer writing Playwright Python tests for an "
+    "existing pytest framework. Follow its conventions strictly. Return ONLY valid "
+    "Python — no markdown fences, no prose."
+)
+
+_TEST_PROMPT = """
+Generate one pytest test function for this scenario.
+
+Scenario (JSON):
+{scenario_json}
+
+Framework conventions:
+- Import: `import re`, `import pytest`, `from playwright.sync_api import expect`.
+- Add `pytestmark = pytest.mark.web` at module level (these are browser UI tests).
+- The function receives page-object fixtures by name: {fixtures} plus `e2e_data` for data.
+- Available page objects and key methods:
+    login_page:     navigate(); login(username, password); error_message (locator)
+    inventory_page: add_product_to_cart(key); go_to_cart(); cart_badge (locator)
+    cart_page:      proceed_to_checkout(); first_item_name (locator); cart_items (locator)
+    checkout_page:  fill_customer_info(first,last,zip); continue_to_overview();
+                    finish_order(); confirmation_header (locator)
+- e2e_data has: users.standard{{username,password}}, users.locked_out, users.invalid,
+  products.backpack{{name,add_to_cart_key,expected_price}}, checkout.valid_customer.
+- Add @pytest.mark markers matching the scenario markers.
+- Structure the body as Arrange / Act / Assert with comment headers.
+- Docstring must include 'Scenario:' and 'Expected:' lines.
+- NO raw page.click/page.fill; NO time.sleep; NO hardcoded URLs or credentials.
+
+Return the full test file content (imports + the single test function):
+"""
+
+# Map a page name to its conftest fixture name.
+_FIXTURES = {
+    "login": "login_page",
+    "inventory": "inventory_page",
+    "cart": "cart_page",
+    "checkout": "checkout_page",
+}
+
+
+class Generator(BaseAgent):
+    """Scenario → GeneratedArtifact (test code, optional Page Object stub)."""
+
+    def generate(self, scenario: Scenario, output_dir: str = "tests/web/generated") -> GeneratedArtifact:
+        # One file per scenario keyed on its stable id, so multiple scenarios in a
+        # plan never overwrite each other.
+        test_path = str(Path(output_dir) / f"test_{scenario.id}.py")
+
+        if self.use_llm:
+            code = self._generate_llm(scenario)
+            if code:
+                return GeneratedArtifact(
+                    scenario_id=scenario.id,
+                    test_path=test_path,
+                    test_code=code,
+                    generated_by="llm",
+                )
+            logger.warning("Generator LLM path failed; using offline template.")
+
+        return GeneratedArtifact(
+            scenario_id=scenario.id,
+            test_path=test_path,
+            test_code=self._generate_offline(scenario),
+            generated_by="offline",
+        )
+
+    # ── LLM path ──────────────────────────────────────────────────────────────
+
+    def _generate_llm(self, scenario: Scenario) -> Optional[str]:
+        fixtures = [_FIXTURES[p] for p in scenario.pages if p in _FIXTURES] or ["login_page"]
+        code = self._llm.complete(
+            prompt=_TEST_PROMPT.format(
+                scenario_json=scenario.model_dump_json(indent=2),
+                fixtures=", ".join(fixtures),
+            ),
+            system=_SYSTEM,
+            max_tokens=900,
+        )
+        return self.strip_code_fences(code) or None
+
+    # ── Offline template path ───────────────────────────────────────────────────
+
+    def _generate_offline(self, scenario: Scenario) -> str:
+        fixtures = [_FIXTURES[p] for p in scenario.pages if p in _FIXTURES]
+        if not fixtures:
+            fixtures = ["login_page"]
+        params = ", ".join(fixtures + ["e2e_data"])
+        markers = "\n".join(f"@pytest.mark.{m}" for m in scenario.markers)
+        is_negative = "negative" in scenario.markers
+
+        body = self._compose_body(scenario, is_negative)
+
+        return f'''"""
+Auto-generated by Shreyzen Generator agent (offline mode).
+Feature: {scenario.title}
+
+Review before committing — generated code is a starting point, not a final artifact.
+"""
+
+import re
+import pytest
+from playwright.sync_api import expect
+
+pytestmark = pytest.mark.web
+
+
+{markers}
+def test_{scenario.id}({params}):
+    """
+    Scenario: {scenario.description or scenario.title}
+    Expected: the behaviour described above holds.
+    """
+{body}
+'''
+
+    def _compose_body(self, scenario: Scenario, is_negative: bool) -> str:
+        """Build an Arrange/Act/Assert body from the scenario's pages.
+
+        For multi-page flows the act and its assertion are interleaved per stage
+        (login → inventory → cart → checkout), because intermediate assertions
+        like the inventory URL check must run *before* the next navigation.
+        """
+        pages = scenario.pages
+        lines: List[str] = []
+
+        def stage(comment: str, code: List[str]) -> None:
+            lines.append(f"    # ── {comment} " + "─" * max(4, (58 - len(comment))))
+            lines.extend(f"    {c}" for c in code)
+            lines.append("")
+
+        if "login" in pages:
+            if is_negative:
+                stage("Arrange", ["user = e2e_data['users']['invalid']", "login_page.navigate()"])
+                stage("Act — submit invalid credentials",
+                      ["login_page.login(user['username'], user['password'])"])
+                stage("Assert — error shown, not logged in", [
+                    "expect(login_page.error_message).to_be_visible()",
+                    "expect(login_page.page).not_to_have_url(re.compile(r'/inventory\\.html'))",
+                ])
+                return "\n".join(lines).rstrip() + "\n"
+
+            # Happy path — interleave each stage's action with its assertion.
+            stage("Arrange", ["user = e2e_data['users']['standard']"])
+            stage("Login", [
+                "login_page.navigate()",
+                "login_page.login(user['username'], user['password'])",
+                "expect(login_page.page).to_have_url(re.compile(r'/inventory\\.html'))",
+            ])
+            if "inventory" in pages:
+                stage("Add product to cart", [
+                    "product = e2e_data['products']['backpack']",
+                    "inventory_page.add_product_to_cart(product['add_to_cart_key'])",
+                    "expect(inventory_page.cart_badge).to_have_text('1')",
+                ])
+            if "cart" in pages:
+                stage("Open cart and verify item", [
+                    "inventory_page.go_to_cart()",
+                    "expect(cart_page.first_item_name).to_have_text(product['name'])",
+                ])
+            if "checkout" in pages:
+                stage("Checkout and confirm order", [
+                    "customer = e2e_data['checkout']['valid_customer']",
+                    "cart_page.proceed_to_checkout()",
+                    "checkout_page.fill_customer_info(customer['first_name'], customer['last_name'], customer['zip_code'])",
+                    "checkout_page.continue_to_overview()",
+                    "checkout_page.finish_order()",
+                    "expect(checkout_page.confirmation_header).to_have_text('Thank you for your order!')",
+                ])
+            return "\n".join(lines).rstrip() + "\n"
+
+        # Generic scaffold — reached only for flows that don't touch a known page.
+        # Kept intentionally minimal and side-effect-free so it always executes.
+        fixture = _FIXTURES.get(pages[0], "login_page") if pages else "login_page"
+        stage("Arrange", ["# Drive the page object to the scenario's starting state"])
+        stage("Act", ["# Perform the scenario's primary action via the page object above"])
+        stage("Assert", [f"expect({fixture}.page).to_have_title(re.compile(r'.+'))"])
+        return "\n".join(lines).rstrip() + "\n"

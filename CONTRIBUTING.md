@@ -1,6 +1,6 @@
-# Contributing to PlaySight
+# Contributing to Shreyzen
 
-Thanks for taking the time to contribute! 🎭 PlaySight is a hybrid
+Thanks for taking the time to contribute! 🎯 Shreyzen is a hybrid
 **Playwright + Pytest** framework with AI assists, load/performance/security
 testing, and web dashboards. Contributions of every size are welcome —
 bug reports, docs, tests, and features.
@@ -27,7 +27,7 @@ agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 - 🐛 **Report a bug** — open a [bug report](https://github.com/ShreyasKereRavindranath/playwrightAI/issues/new/choose).
 - ✨ **Request a feature** — open a [feature request](https://github.com/ShreyasKereRavindranath/playwrightAI/issues/new/choose).
-- 🧪 **Add tests** — new scenarios under `PlaySight/tests/{api,web,mobile}` or load scenarios under `PlaySight/load`.
+- 🧪 **Add tests** — new scenarios under `Shreyzen/tests/{api,web,mobile}` or load scenarios under `Shreyzen/load`.
 - 📝 **Improve docs** — the `*_GUIDELINES.md` docs and the `HOW_TO_*` guides.
 - 🌱 **Good first issues** — look for the
   [`good first issue`](https://github.com/ShreyasKereRavindranath/playwrightAI/labels/good%20first%20issue)
@@ -37,12 +37,12 @@ agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Development setup
 
-PlaySight targets **Python 3.11**. The one-command launcher creates the
+Shreyzen targets **Python 3.11**. The one-command launcher creates the
 virtualenv and installs everything on first run.
 
 ```bash
 git clone https://github.com/ShreyasKereRavindranath/playwrightAI.git
-cd playwrightAI/PlaySight
+cd playwrightAI/Shreyzen
 
 ./run.sh                    # creates .venv, installs deps, opens Studio → http://127.0.0.1:8770
 ```
@@ -50,7 +50,7 @@ cd playwrightAI/PlaySight
 Prefer to set things up manually?
 
 ```bash
-cd PlaySight
+cd Shreyzen
 python3.11 -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements.txt      # installs Playwright + Locust
@@ -63,7 +63,7 @@ pytest tests/web -v                  # the browser auto-installs on first run
 
 For AI features (self-healing locators, NL→test generation, auto-repair, etc.),
 configure a provider as described in
-[LLM_PROVIDERS.md](PlaySight/LLM_PROVIDERS.md). Without a provider, PlaySight
+[LLM_PROVIDERS.md](Shreyzen/LLM_PROVIDERS.md). Without a provider, Shreyzen
 falls back to a deterministic offline mode, so you can still run and develop.
 
 ---
@@ -71,7 +71,7 @@ falls back to a deterministic offline mode, so you can still run and develop.
 ## Project layout
 
 ```
-PlaySight/
+Shreyzen/
   config/   → configuration loader + .env
   pages/    → Page Object Model classes
   tests/    → api/ · web/ · mobile/ (+ shared conftest.py)
@@ -93,16 +93,16 @@ opening a PR**:
 
 | Area | Guide |
 |------|-------|
-| Onboarding & architecture | [HOW_TO_PROCEED.md](PlaySight/HOW_TO_PROCEED.md) |
-| Capabilities & config flags | [HOW_TO_CONFIGURE.md](PlaySight/HOW_TO_CONFIGURE.md) |
-| Anti-patterns to avoid | [DO_NOT_DO.md](PlaySight/DO_NOT_DO.md) |
-| Tests | [tests/TEST_GUIDELINES.md](PlaySight/tests/TEST_GUIDELINES.md) |
-| Page objects | [pages/PAGES_GUIDELINES.md](PlaySight/pages/PAGES_GUIDELINES.md) |
-| Config | [config/CONFIG_GUIDELINES.md](PlaySight/config/CONFIG_GUIDELINES.md) |
-| Utils | [utils/UTILS_GUIDELINES.md](PlaySight/utils/UTILS_GUIDELINES.md) |
-| Data | [data/DATA_GUIDELINES.md](PlaySight/data/DATA_GUIDELINES.md) |
-| AI agents | [agents/AGENTS_GUIDELINES.md](PlaySight/agents/AGENTS_GUIDELINES.md) |
-| Load testing | [LOAD_TESTING.md](PlaySight/LOAD_TESTING.md) |
+| Onboarding & architecture | [HOW_TO_PROCEED.md](Shreyzen/HOW_TO_PROCEED.md) |
+| Capabilities & config flags | [HOW_TO_CONFIGURE.md](Shreyzen/HOW_TO_CONFIGURE.md) |
+| Anti-patterns to avoid | [DO_NOT_DO.md](Shreyzen/DO_NOT_DO.md) |
+| Tests | [tests/TEST_GUIDELINES.md](Shreyzen/tests/TEST_GUIDELINES.md) |
+| Page objects | [pages/PAGES_GUIDELINES.md](Shreyzen/pages/PAGES_GUIDELINES.md) |
+| Config | [config/CONFIG_GUIDELINES.md](Shreyzen/config/CONFIG_GUIDELINES.md) |
+| Utils | [utils/UTILS_GUIDELINES.md](Shreyzen/utils/UTILS_GUIDELINES.md) |
+| Data | [data/DATA_GUIDELINES.md](Shreyzen/data/DATA_GUIDELINES.md) |
+| AI agents | [agents/AGENTS_GUIDELINES.md](Shreyzen/agents/AGENTS_GUIDELINES.md) |
+| Load testing | [LOAD_TESTING.md](Shreyzen/LOAD_TESTING.md) |
 
 General principles:
 
@@ -110,7 +110,7 @@ General principles:
 - **Markers** — tag tests with the right pytest markers (`api` / `web` / `mobile` / `smoke` / `unit`) so CI and the Studio filters work.
 - **Keep it deterministic** — avoid flaky waits; prefer Playwright's auto-waiting and explicit expectations.
 - **Data-driven** — put fixtures/test data in `data/`, not inline.
-- Skim [DO_NOT_DO.md](PlaySight/DO_NOT_DO.md) — it lists the anti-patterns we actively reject in review.
+- Skim [DO_NOT_DO.md](Shreyzen/DO_NOT_DO.md) — it lists the anti-patterns we actively reject in review.
 
 ---
 
@@ -119,7 +119,7 @@ General principles:
 Run these before pushing — they mirror the `pr-checks.yml` CI workflow:
 
 ```bash
-cd PlaySight
+cd Shreyzen
 pytest -m smoke            # critical path
 pytest tests/api -v        # API layer   (or: pytest -m api)
 pytest tests/web -v        # Web UI      (or: pytest -m web)

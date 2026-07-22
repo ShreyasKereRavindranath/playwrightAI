@@ -17,7 +17,7 @@ on:
 
 defaults:
   run:
-    working-directory: PlaySight
+    working-directory: Shreyzen
 
 jobs:
   soak:
@@ -32,7 +32,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: PlaySight/requirements.txt
+          cache-dependency-path: Shreyzen/requirements.txt
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Soak — ${{ matrix.scenario }}
@@ -47,4 +47,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: soak-${{ matrix.scenario }}
-          path: PlaySight/logs_and_reports/load_runs/
+          path: Shreyzen/logs_and_reports/load_runs/

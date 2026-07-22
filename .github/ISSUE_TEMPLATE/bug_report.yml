@@ -40,7 +40,7 @@ body:
     id: area
     attributes:
       label: Area
-      description: Which part of PlaySight is affected?
+      description: Which part of Shreyzen is affected?
       options:
         - Functional tests (api/web/mobile)
         - Load testing (Locust)
