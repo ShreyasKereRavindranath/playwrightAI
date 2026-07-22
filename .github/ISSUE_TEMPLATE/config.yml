@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions & Discussion
+    url: https://github.com/ShreyasKereRavindranath/playwrightAI/discussions
+    about: Ask questions, share ideas, or get help using PlaySight.
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/ShreyasKereRavindranath/playwrightAI/security/advisories/new
+    about: Please report security issues privately — see SECURITY.md. Do not open a public issue.

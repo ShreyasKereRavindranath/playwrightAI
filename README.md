@@ -1,8 +1,25 @@
 # 🎭 PlaySight
 
+[![CI](https://github.com/ShreyasKereRavindranath/playwrightAI/actions/workflows/pr-checks.yml/badge.svg)](https://github.com/ShreyasKereRavindranath/playwrightAI/actions/workflows/pr-checks.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
+[![Playwright](https://img.shields.io/badge/Playwright-1.49-2EAD33.svg?logo=playwright)](https://playwright.dev/python/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Code of Conduct](https://img.shields.io/badge/Contributor%20Covenant-2.1-purple.svg)](CODE_OF_CONDUCT.md)
+
 A hybrid **Playwright + Pytest** automation framework with AI assists, a full
 **load / performance / security** testing platform, and two web dashboards — all
 runnable locally with no commands to memorise.
+
+## Demo
+
+<!-- TODO: record a ~20-30s GIF/MP4 of ./run.sh → Studio → pick tests → Run → live pass/fail,
+     drop it in docs/assets/, and replace the placeholder below. See CONTRIBUTING.md § Demo asset. -->
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="PlaySight Studio demo — pick tests, run, watch live pass/fail" width="820">
+  <br>
+  <em>PlaySight Studio: pick tests, hit Run, watch live results. (Demo GIF coming soon.)</em>
+</p>
 
 - **UI tests** (Playwright) split by layer: `api` · `web` · `mobile`
 - **Load testing** (Locust): 6 profiles, custom virtual-user control, live dashboard
@@ -87,6 +104,12 @@ left hanging). Tabs:
 python tools/studio.py run --scenario crud --profile smoke   # exits non-zero on breach
 ```
 
+> ⚠️ **Point load tests at systems you own or are authorised to test.** The bundled
+> **mock** server is the intended load target. The **public** API option
+> (`restful-booker.herokuapp.com`) is a shared free demo — fine for a few
+> functional API calls, but do **not** aim `load` / `stress` / `spike` / `soak`
+> profiles at it (or any third-party host) without permission.
+
 - **Analytics** — pass-rate/flakiness/perf trends (also standalone: `python tools/dashboard.py`).
 - **Compare Runs** — pick 2+ runs (load or functional) and compare metrics side by side (table scrolls horizontally).
 - **AI Provider** — pick the LLM provider (see below).
@@ -97,7 +120,7 @@ for functional, `LOAD_<scenario>_<profile>` for load). The active LLM provider a
 model are recorded too — or, when none is configured/active, a deterministic
 offline fallback. Load scenarios: `crud` · `journey` · `security`. Profiles:
 `smoke` · `load` · `stress` · `spike` · `soak` · `breakpoint` · `custom`.
-Full guide: **[LOAD_TESTING.md](LOAD_TESTING.md)**.
+Full guide: **[LOAD_TESTING.md](PlaySight/LOAD_TESTING.md)**.
 
 ## Dashboards
 
@@ -128,11 +151,11 @@ run.sh    → one-command launcher
 
 | Doc | What it covers |
 |-----|----------------|
-| [HOW_TO_PROCEED.md](HOW_TO_PROCEED.md) | Onboarding: setup → architecture → building tests |
-| [HOW_TO_CONFIGURE.md](HOW_TO_CONFIGURE.md) | Every capability, its config flags, and run commands |
-| [LOAD_TESTING.md](LOAD_TESTING.md) | Load runner, profiles, scenarios, reports, CI |
-| [LLM_PROVIDERS.md](LLM_PROVIDERS.md) | Multi-provider LLM layer: providers, config, local setup, extending |
-| [DO_NOT_DO.md](DO_NOT_DO.md) | Anti-patterns to avoid |
+| [HOW_TO_PROCEED.md](PlaySight/HOW_TO_PROCEED.md) | Onboarding: setup → architecture → building tests |
+| [HOW_TO_CONFIGURE.md](PlaySight/HOW_TO_CONFIGURE.md) | Every capability, its config flags, and run commands |
+| [LOAD_TESTING.md](PlaySight/LOAD_TESTING.md) | Load runner, profiles, scenarios, reports, CI |
+| [LLM_PROVIDERS.md](PlaySight/LLM_PROVIDERS.md) | Multi-provider LLM layer: providers, config, local setup, extending |
+| [DO_NOT_DO.md](PlaySight/DO_NOT_DO.md) | Anti-patterns to avoid |
 | `*/‌*_GUIDELINES.md` | Layer-specific rules (tests, pages, config, utils, data, agents) |
 
 ---
@@ -147,6 +170,20 @@ run.sh    → one-command launcher
 
 ---
 
+## Roadmap
+
+A lightweight snapshot of where PlaySight is headed — see the
+[issues](https://github.com/ShreyasKereRavindranath/playwrightAI/issues) for
+details and to weigh in.
+
+- **In progress** — sharper AI auto-repair, richer run-comparison metrics.
+- **Planned** — visual-regression baselines in Studio, more Locust scenarios, downloadable Allure trend history.
+- **Ideas / help wanted** — additional LLM providers, accessibility (a11y) test layer, container/devcontainer setup.
+
+Have an idea? Open a [feature request](https://github.com/ShreyasKereRavindranath/playwrightAI/issues/new/choose).
+
+---
+
 ## License & Contributing
 
 PlaySight is open source under the **[MIT License](LICENSE)** — free for anyone to
@@ -154,6 +191,25 @@ use, fork, modify, and ship in their own projects (a copyright/permission notice
 all that's asked).
 
 If it's useful to you: **⭐ star the repo, 🍴 fork it for your own project, and 🙌
-contribute** — improvements, bug reports, and constructive critique are all
-welcome via issues and pull requests. See the layer `*_GUIDELINES.md` docs for
-conventions before submitting a PR.
+contribute** — improvements, bug reports, and constructive critique are all welcome.
+
+- **New here?** Start with **[CONTRIBUTING.md](CONTRIBUTING.md)** — setup, coding
+  standards, and the PR workflow. Look for
+  [good first issues](https://github.com/ShreyasKereRavindranath/playwrightAI/labels/good%20first%20issue)
+  to get started.
+- **Be kind** — this project follows a **[Code of Conduct](CODE_OF_CONDUCT.md)**.
+- **Found a vulnerability?** See our **[Security Policy](SECURITY.md)** for private disclosure.
+
+See the layer `*_GUIDELINES.md` docs for conventions before submitting a PR.
+
+## Trademarks & attribution
+
+PlaySight builds on and integrates with excellent open-source and third-party
+projects. All product names, logos, and brands are the property of their
+respective owners, and their use here is for identification and compatibility
+purposes only — it does not imply any endorsement or affiliation. This includes,
+among others: Playwright (Microsoft), Cypress (Cypress.io), Locust, Allure
+(Qameta Software), Chart.js, axe-core (Deque Systems), OpenAI, Anthropic, Google
+Gemini, Ollama, LM Studio, and iPhone (Apple Inc.). Bundled fonts and libraries
+are used under their own licenses (e.g. the Inter font under the SIL Open Font
+License, Chart.js under MIT, axe-core under MPL-2.0).

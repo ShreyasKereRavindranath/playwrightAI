@@ -1,0 +1,83 @@
+name: 🐛 Bug report
+description: Report something that isn't working as expected
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug! Please search existing issues first to avoid duplicates.
+        For **security vulnerabilities**, do not use this form — see [SECURITY.md](https://github.com/ShreyasKereRavindranath/playwrightAI/blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug — what you expected vs. what actually happened.
+      placeholder: I ran ... and expected ..., but instead ...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps or the command you ran.
+      placeholder: |
+        1. Run `./run.sh`
+        2. In Studio, select ...
+        3. Click Run
+        4. See error
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / reports
+      description: Console output, or relevant files from `logs_and_reports/`. This will be rendered as code.
+      render: shell
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of PlaySight is affected?
+      options:
+        - Functional tests (api/web/mobile)
+        - Load testing (Locust)
+        - Studio / dashboards
+        - AI / LLM features
+        - CI / GitHub Actions
+        - Docs
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "e.g. macOS 15.5, Ubuntu 24.04, Windows 11"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "e.g. 3.11.9 (run: python --version)"
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser (for web/mobile bugs)
+      placeholder: "e.g. Chromium, WebKit; device iPhone 13"
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: I'm on the latest version of `main`.
+          required: true
