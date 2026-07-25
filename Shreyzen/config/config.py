@@ -66,6 +66,13 @@ class Config:
     # ── Capability: AI Test Summary ───────────────────────────────────────────
     AI_SUMMARY: bool = os.getenv("AI_SUMMARY", "false").lower() == "true"
 
+    # ── Capability: Extent-style HTML Report ──────────────────────────────────
+    # Opt-in consolidated interactive report (donut + category breakdown +
+    # filterable per-test cards). Written to logs_and_reports/extent_report.html
+    # for functional runs and into each load run's folder. Complements — never
+    # replaces — the pytest-html / Allure / JUnit outputs.
+    EXTENT_REPORT: bool = os.getenv("EXTENT_REPORT", "false").lower() == "true"
+
     # ── Capability: Regression Detection / Alerts ─────────────────────────────
     # Compare the latest run to the median of prior runs and flag regressions.
     REGRESSION_ALERTS: bool = os.getenv("REGRESSION_ALERTS", "true").lower() == "true"

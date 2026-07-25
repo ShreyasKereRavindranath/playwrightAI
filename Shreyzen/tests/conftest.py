@@ -106,6 +106,19 @@ _session_stats: dict = {
     "failed_tests": [], "start_time": None,
 }
 
+# Per-test records for the Extent-style report (Capability 26). Collected in
+# pytest_runtest_makereport; consumed in pytest_sessionfinish when EXTENT_REPORT.
+_test_records: list = []
+
+
+def _test_category(item) -> str:
+    """Best-effort category for a test: a layer marker, else its folder."""
+    for marker in ("web", "mobile", "api", "unit", "visual", "accessibility"):
+        if item.get_closest_marker(marker):
+            return marker
+    parts = item.nodeid.split("/")
+    return parts[1] if len(parts) > 2 and parts[0] == "tests" else "tests"
+
 
 def _safe_name(nodeid: str, max_len: int = 120) -> str:
     name = (
@@ -366,6 +379,17 @@ def pytest_runtest_makereport(item, call):
         elif report.skipped:
             _session_stats["skipped"] += 1
 
+        # 5b. Record for the Extent-style report (Capability 26).
+        if Config.EXTENT_REPORT:
+            _test_records.append({
+                "nodeid": item.nodeid,
+                "name": item.nodeid.split("::", 1)[-1],
+                "status": "fail" if report.failed else ("skip" if report.skipped else "pass"),
+                "duration_s": round(getattr(report, "duration", 0.0) or 0.0, 3),
+                "category": _test_category(item),
+                "message": (report.longreprtext[:1500] if report.failed else ""),
+            })
+
     # ── After all teardowns (context closed, video file finalised) ────────
     if report.when == "teardown":
         safe   = _safe_name(item.nodeid)
@@ -438,6 +462,27 @@ def pytest_sessionfinish(session, exitstatus):
                 gen.inject_into_html_report(ai_summary_text, str(report_path))
         except Exception as exc:
             logger.warning("AI summary failed: %s", exc)
+
+    # 8b. Extent-style consolidated HTML report (Capability 26)
+    if Config.EXTENT_REPORT:
+        try:
+            from utils import extent_report
+            meta = {
+                "title": "Shreyzen — Extent Report",
+                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "context": {
+                    "Run": RUN_TS,
+                    "Passed": passed, "Failed": failed,
+                    "Skipped": skipped, "Errors": error,
+                    "Duration": f"{elapsed:.1f}s",
+                    "Flaky": ", ".join(t.get("test_id", "") for t in flaky_tests[:5]) or "—",
+                },
+            }
+            out = extent_report.write_report(
+                Path("logs_and_reports/extent_report.html"), _test_records, meta)
+            logger.info("Extent report → %s", out)
+        except Exception as exc:
+            logger.warning("Extent report failed: %s", exc)
 
     # 9. Slack / Teams notification
     if Config.SLACK_NOTIFICATIONS:
