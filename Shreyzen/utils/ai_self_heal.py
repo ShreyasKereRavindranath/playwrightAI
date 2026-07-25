@@ -46,8 +46,13 @@ class AISelfHeal:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def heal(self, intent: str, page_html: str) -> Optional[str]:
-        """Return a candidate locator string, or None if healing fails."""
+    def heal(self, intent: str, page_html: str, original: Optional[str] = None) -> Optional[str]:
+        """Return a candidate locator string, or None if healing fails.
+
+        `original` is the failing locator's selector string (when known). It's
+        recorded in the healing log so `tools/heal_pr.py` can find and rewrite it
+        in the Page Object automatically.
+        """
         from utils.llm_client import LLMClient
 
         llm = LLMClient()
@@ -77,7 +82,7 @@ class AISelfHeal:
             return None
 
         logger.warning("AI self-heal CANDIDATE: '%s' — UPDATE YOUR PAGE OBJECT", candidate)
-        self._log_healing(intent, candidate)
+        self._log_healing(intent, candidate, original)
         return candidate
 
     @staticmethod
@@ -98,7 +103,7 @@ class AISelfHeal:
 
     # ── Healing log ───────────────────────────────────────────────────────────
 
-    def _log_healing(self, intent: str, candidate: str) -> None:
+    def _log_healing(self, intent: str, candidate: str, original: Optional[str] = None) -> None:
         """Append the healed locator to data/healing_log.json for human review."""
         _HEAL_LOG.parent.mkdir(parents=True, exist_ok=True)
         log: list = []
@@ -111,6 +116,7 @@ class AISelfHeal:
         log.append({
             "timestamp": datetime.now().isoformat(),
             "intent": intent,
+            "original_locator": original or "",
             "healed_locator": candidate,
             "status": "PENDING_REVIEW",
             "page_url": self.page.url,
@@ -132,13 +138,18 @@ class AISelfHeal:
     @staticmethod
     def mark_reviewed(intent: str) -> None:
         """Mark a healing entry as reviewed (call after updating the Page Object)."""
+        AISelfHeal.set_status(intent, "REVIEWED")
+
+    @staticmethod
+    def set_status(intent: str, status: str) -> None:
+        """Set the status of every healing entry matching `intent`."""
         if not _HEAL_LOG.exists():
             return
         try:
             log = json.loads(_HEAL_LOG.read_text())
             for entry in log:
                 if entry.get("intent") == intent:
-                    entry["status"] = "REVIEWED"
+                    entry["status"] = status
             _HEAL_LOG.write_text(json.dumps(log, indent=2))
         except Exception as exc:
-            logger.warning("Could not mark healing as reviewed: %s", exc)
+            logger.warning("Could not update healing status: %s", exc)
