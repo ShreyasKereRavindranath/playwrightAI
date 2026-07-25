@@ -120,6 +120,28 @@ python -m tools.healings --reviewed "<intent>" # mark one reviewed
 ```
 The raw log remains at `data/healing_log.json`.
 
+**Auto-fix / auto-PR (fold healings back automatically):** instead of hand-editing,
+let the framework rewrite the Page Object. Because the healing log now records the
+**original** selector alongside the healed one, `tools/heal_pr.py` can find that
+selector in `pages/*.py` and replace it — then optionally commit on a branch and
+open a PR.
+
+```bash
+python -m tools.heal_pr                 # preview the proposed edits (dry run)
+python -m tools.heal_pr --apply         # write the fixes into pages/*.py
+python -m tools.heal_pr --open-pr       # write + commit on a branch + open a PR (needs the gh CLI)
+python -m tools.heal_pr --json          # machine-readable plan
+```
+
+Only **unambiguous** healings are applied automatically — the original selector
+must appear in exactly one place in exactly one Page Object. Anything else
+(`ambiguous`, `not_found`, `no_original`) is reported for a human, never guessed.
+Auto-fix works for `self.page.locator("<css/test-id>")`-style locators (the fragile
+kind healing targets); `get_by_role/label` locators are reported for manual edit.
+Applied entries are marked in the log (`APPLIED` / `PR_OPENED`) so they don't
+resurface. Without the `gh` CLI, `--open-pr` still commits on a branch and prints
+the push/PR command. Wire it into a nightly job to keep locators self-maintaining.
+
 ---
 
 ## Capability 2 — Flakiness Tracker
@@ -144,6 +166,48 @@ print(tracker.get_stats("tests/web/test_purchase_flow.py::test_login_valid[chrom
 ```
 
 Flaky tests are also printed to the console at the end of every pytest session.
+
+### AI diagnosis + auto-quarantine
+
+Tracking a flake is only half the job — this turns it into action. `tools/flaky.py`
+explains *why* a test is flaky (AI diagnosis, with a deterministic offline
+heuristic when no LLM is configured) and manages a **quarantine list** that keeps
+known-flaky tests out of the gating run so they can't fail the build.
+
+```bash
+python -m tools.flaky                      # list flaky tests + quarantine status
+python -m tools.flaky --diagnose           # diagnose every flaky test (category · why · fix)
+python -m tools.flaky --diagnose "<id>"    # diagnose one test id
+python -m tools.flaky --quarantine "<id>"  # quarantine a test (records the diagnosis)
+python -m tools.flaky --unquarantine "<id>"
+python -m tools.flaky --list-quarantine
+```
+
+Diagnosis categories: `timing · animation · network · data · selector ·
+order_dependency · cross_browser · unknown`, each with a concrete suggested fix.
+
+**Quarantine lane.** Quarantined tests (in `data/quarantine.json`) are deselected
+from the normal run and marked `@pytest.mark.quarantine`; run just them in their
+own lane with:
+```bash
+pytest --quarantine-only        # run ONLY the quarantined tests
+```
+
+**Auto-quarantine (opt-in).** With `AUTO_QUARANTINE=true`, the session-end hook
+adds any newly-detected flaky test to the quarantine list automatically, attaching
+its AI/heuristic diagnosis and suggested fix. Enforcement is on by default
+(`QUARANTINE_ENABLED=true`) and is a no-op while the list is empty.
+
+```ini
+QUARANTINE_ENABLED=true   # honour the quarantine list during collection
+AUTO_QUARANTINE=false     # auto-add newly-flaky tests at session end
+```
+
+**CI pattern:** gate on the clean suite, then run the flaky lane non-blocking:
+```bash
+pytest -m smoke                       # gating job — quarantined flakes excluded
+pytest --quarantine-only || true      # visibility job — never fails the build
+```
 
 ---
 
@@ -222,6 +286,10 @@ python tools/generate_test.py "Add item to cart and verify total" --page invento
 ```
 
 Output is written to `pages/` and `tests/` — review and adjust before committing.
+
+> **Reliability:** generated files are automatically validated with
+> `pytest --collect-only` and repaired by the LLM on failure — see
+> **Capability 28**. Disable per-run with `--no-repair`.
 
 ---
 
@@ -479,8 +547,9 @@ python tools/studio.py serve      # → http://127.0.0.1:8770   (or ./run.sh)
 
 **Load mode** — Locust load/soak/spike/stress + non-destructive security probes:
 - **6 load profiles:** smoke, load, stress, spike, soak, breakpoint (+ Custom).
-- **3 scenarios:** API CRUD (full create/read/update/patch/delete), a full
-  user journey, and security probes.
+- **4 scenarios:** API CRUD (full create/read/update/patch/delete), a full
+  user journey, security probes, and **Selected APIs** (`api_select`) — pick
+  exactly which endpoints to hit, then run any profile against just that set.
 - **Custom VU control:** run any scenario at any scale via the slider / fields.
 - **Reports on every run:** HTML + JUnit + JSON + Allure under
   `logs_and_reports/load_runs/<run_id>/`. The HTML report is **titled by load type**
@@ -689,6 +758,9 @@ python -m tools.record_generate https://example.com --page cart --print-only
 
 Endpoints: `POST /api/record/start`, `GET /api/record/state`.
 
+> **Reliability:** the converted Page Object + smoke test are validated with
+> `pytest --collect-only` and repaired by the LLM on failure — see **Capability 28**.
+
 ---
 
 ## Capability 23 — Central Results Database
@@ -753,6 +825,255 @@ pytest tests/ -v
 ```
 
 Open `logs_and_reports/report.html` — the AI summary appears at the top.
+
+---
+
+## Capability 25 — Project Scaffolding (`init`) & Environment Doctor
+
+Drop Shreyzen onto **any** project without inheriting the bundled saucedemo demo.
+`init` writes a `config/.env` pointed at your app, scaffolds a starter Page Object
+and smoke test in the framework's conventions, and can archive the demo so you
+start from a clean slate. `doctor` validates the environment before you run.
+
+**No setup** — both ship with the framework.
+
+### `shreyzen init` — scaffold a new project
+
+```bash
+# Interactive (prompts for name / URL / template / page):
+python -m tools.init
+#   ↳ also: ./run.sh init      or   python tools/studio.py init
+
+# Non-interactive:
+python -m tools.init --name "Acme Store" --url https://acme.example.com --template web --page dashboard
+
+# API-only project:
+python -m tools.init --url https://api.acme.com --template api --page account
+
+# Start clean — archive the saucedemo demo to examples/legacy_saucedemo/ (reversible):
+python -m tools.init --url https://acme.example.com --clean --yes
+```
+
+| Flag | Meaning |
+|---|---|
+| `--name` | Human-readable project name (used in generated docstrings). |
+| `--url` | Application root URL → `BASE_URL` in `config/.env`. |
+| `--template` | `web` \| `api` \| `mobile` — which starter test to scaffold (default `web`). |
+| `--page` | Page/feature name for the starter files (default `home`). |
+| `--clean` | Move the bundled saucedemo demo (pages, tests, data) to `examples/legacy_saucedemo/`. |
+| `--force` | Overwrite existing generated files (never overwrites silently otherwise). |
+| `--yes` | Assume "yes" to prompts (non-interactive / CI). |
+
+What it writes:
+- `config/.env` — from `.env.example` with your `BASE_URL` (an existing `.env` is
+  never clobbered; only its `BASE_URL` is updated unless you pass `--force`).
+- `pages/<page>_page.py` — a `BasePage` subclass stub (skipped for `--template api`).
+- `tests/<layer>/test_<page>_smoke.py` — a runnable starter test with a placeholder
+  assertion to replace.
+
+**Reversible decoupling:** `--clean` *moves* the demo, it never deletes. The
+framework core doesn't depend on the demo — `tests/conftest.py` imports the demo
+Page Objects and registers their fixtures **defensively**, so archiving them (or
+just deleting `pages/*_page.py`) leaves every capability working. Move the files
+back to restore the demo.
+
+### `shreyzen doctor` — validate the environment
+
+```bash
+python -m tools.doctor          # human-readable checklist
+python -m tools.doctor --json   # machine-readable (for CI)
+#   ↳ also: ./run.sh doctor
+```
+
+Checks Python version (3.11+), the virtualenv, core dependencies, `config/.env`
+and its required keys, the Playwright browser binary, the git repo (needed for
+impact analysis), and the selected LLM provider. Each failing check prints a fix
+hint. It exits **non-zero only on blocking failures** (soft/optional issues —
+e.g. no LLM key — are warnings), so it can gate CI:
+
+```yaml
+- name: Validate environment
+  run: python -m tools.doctor
+```
+
+---
+
+## Capability 26 — Selected-API Load Testing (`api_select`)
+
+Choose **exactly which API endpoints** to exercise (the way you pick individual
+tests in the Functional tab), then run **any** load profile against just that
+selection. Useful for isolating a hot endpoint under stress, or excluding
+destructive verbs from a soak.
+
+**In Studio:** Load tab → pick the **🎯 Selected APIs** scenario → an endpoint
+checklist appears (method + path). Tick the endpoints, pick a profile, Run.
+
+**CLI / CI:**
+```bash
+# Stress only the create + read endpoints:
+python tools/studio.py run --scenario api_select --endpoints create,read --profile stress
+
+# All endpoints (omit --endpoints) at a soak profile:
+python tools/studio.py run --scenario api_select --profile soak
+```
+
+Endpoint keys come from `load/catalog.py:API_ENDPOINTS`
+(`auth, create, read, list, update, patch, delete, ping` for the demo booking
+API — edit that catalog to point at your own API). An unknown key fails loudly.
+The selection is recorded in the run's `results.json` (`meta.endpoints`) and each
+chosen endpoint is judged against the profile's thresholds like any other run.
+
+---
+
+## Capability 27 — Extent-style HTML Report
+
+A single self-contained, interactive report — the Python equivalent of Java's
+ExtentReports — with a **pass/fail/skip donut**, a **category/suite breakdown**,
+and **filterable per-test cards** (status, duration, category, failure message).
+It **complements** the existing pytest-html / Allure / JUnit outputs rather than
+replacing them.
+
+**Setup:**
+```ini
+EXTENT_REPORT=true    # off by default
+```
+
+**Where it lands:**
+- Functional pytest runs → `logs_and_reports/extent_report.html`
+- Load runs → `logs_and_reports/load_runs/<run_id>/extent_report.html`
+
+No API key or extra dependency — the report is built with the standard library
+and opens in any browser. The builder (`utils/extent_report.py`) is a pure
+function of its inputs, so it is fully unit-tested.
+
+---
+
+## Capability 28 — Self-Validating NL Generation (validate-and-repair)
+
+Every AI code-generation path — the **NL generator** (Capabilities 5 & 24), the
+**record-and-generate** converter (Capability 22), and the **agent generator**
+(planner→generator pipeline) — can emit code that *looks* right but fails to
+import, has a syntax slip, or references a fixture that doesn't exist. This
+closes that gap: after code is written, the framework runs `pytest --collect-only`
+on it and — on failure — feeds the exact pytest error back to the LLM to
+**self-correct**, repeating until the files collect cleanly or the attempt budget
+runs out.
+
+Collection is the gate because it catches the failure modes generated tests hit
+(syntax, imports, unresolved fixtures) **without** launching a browser or hitting
+a target — so it's fast and safe to run on every generation.
+
+**Setup (defaults shown):**
+```ini
+NL_REPAIR_ENABLED=true    # validate + repair after every NL generation
+NL_REPAIR_ATTEMPTS=2      # max LLM self-correction rounds
+```
+
+**CLI:**
+```bash
+# On by default — validates and repairs the generated files:
+python tools/generate_test.py "User cannot checkout with an empty cart"
+
+# Tune or disable per-run:
+python tools/generate_test.py "Login with SQL injection" --repair-attempts 3
+python tools/generate_test.py "Add item to cart" --no-repair
+```
+
+**In Studio:** the *Describe a test* flow and the *Record a new test* flow both
+show a badge on the result — `✅ collects under pytest` (with the repair-round
+count) or `⚠ still fails collection — review before running`. The agent
+pipeline (`python -m tools.agents_cli generate/pipeline --write`) prints the same
+status per scenario.
+
+The loop lives in `utils/generation_validator.py`; both the validator and the
+repair function are injectable, so the orchestration is fully unit-tested without
+a real LLM. It's best-effort — it never fails the generation request, and on
+give-up it keeps the best attempt and warns.
+
+---
+
+## Capability 29 — MCP Server (agent-native interface)
+
+Drive the whole framework from any **MCP client** (Claude Code, Cursor, …). The
+server exposes the framework's capabilities as tools an agent can call
+conversationally — *"run the smoke tests"*, *"generate a test for empty-cart
+checkout and make sure it collects"*, *"why is test Y flaky? quarantine it"*,
+*"apply the pending self-heals as a PR"* — without leaving the editor.
+
+**Setup:** `mcp` is an **optional** dependency (in `requirements.txt`). Everything
+else works without it; the server prints an install hint if it's missing.
+```bash
+pip install mcp
+python -m tools.mcp_server        # stdio transport
+```
+
+**Register with Claude Code / Cursor** (`.mcp.json` or the client's MCP config):
+```json
+{
+  "mcpServers": {
+    "shreyzen": {
+      "command": "python",
+      "args": ["-m", "tools.mcp_server"],
+      "cwd": "/absolute/path/to/Shreyzen"
+    }
+  }
+}
+```
+
+**Tools exposed:**
+
+| Tool | What it does |
+|---|---|
+| `discover_tests` | List every collectable test, grouped by layer |
+| `run_tests` | Run a selection / marker and return a pass/fail summary (real runner + reports) |
+| `generate_test` | NL → Page Object + test, then validate-and-repair (Capability 28) |
+| `flaky_list` · `flaky_diagnose` | List flaky tests; explain *why* one is flaky + a fix |
+| `quarantine` | list / add / remove quarantined tests (Capability 2) |
+| `heal` | Self-heal status / apply / open a PR (Capability 1) |
+| `impact_analysis` | Tests a change can break, from the import graph (Capability 21) |
+| `run_load` | Run a load profile incl. `api_select` endpoint selection (Capabilities 15, 26) |
+| `results` | Recent run history + totals from the central DB (Capability 23) |
+| `doctor` | Environment health check |
+
+The tool *logic* lives in plain `tool_*` functions in `tools/mcp_server.py`
+(unit-tested with no MCP dependency); FastMCP is a thin wrapper. Long-running
+tools (`run_tests`, `run_load`) block until done — expect a wait, or scope them
+(markers / a small profile) for interactive use.
+
+---
+
+## Capability 30 — Failure Root-Cause Clustering & Triage
+
+Turns a wall of red into a **ranked, labelled triage list**. Every failure's
+message + traceback is persisted during runs; `tools/triage.py` groups recurring
+failures into clusters (by a normalized error signature) and labels each root
+cause: **product_bug · test_bug · flaky · environment** — via the LLM when a
+provider is configured, else a deterministic heuristic.
+
+**Setup:** capture is on by default (no API key needed):
+```ini
+FAILURE_TRACKING=true   # persist message + traceback per failure for clustering
+```
+
+**Run:**
+```bash
+python -m tools.triage              # ranked clusters + heuristic labels
+python -m tools.triage --ai         # let the LLM label each cluster (+ suggested action)
+python -m tools.triage --top 5      # only the largest clusters
+python -m tools.triage --limit 500  # consider the last N failures
+python -m tools.triage --json
+```
+
+Each cluster shows the signature, occurrence count, distinct tests and runs it
+spans, the root-cause label, and (with `--ai`) a suggested next action. The
+heuristic reads the error shape — assertion → product_bug, import/fixture →
+test_bug, network/5xx → environment, a timeout across multiple runs → environment
+vs. a one-off → flaky.
+
+Failures are stored in `logs_and_reports/flakiness.db` (`test_failures` table).
+The signature normalization, clustering, and heuristic are pure functions and
+the LLM is injectable, so the pipeline is fully unit-tested. Also exposed as the
+`cluster_failures` MCP tool (Capability 29).
 
 ---
 

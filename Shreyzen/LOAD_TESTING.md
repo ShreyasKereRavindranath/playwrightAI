@@ -53,7 +53,7 @@ profiles. The rest of this guide covers Load mode.
 
 | Step | What you do |
 |------|-------------|
-| **1 · Pick a test** | Choose a scenario card (CRUD / User Journey / Security). |
+| **1 · Pick a test** | Choose a scenario card (CRUD / User Journey / Security / Selected APIs). |
 | **2 · Pick a profile** | Choose one of the 6 load profiles, or **Custom**. |
 | **3 · Tune & run** | Drag the **Virtual Users** slider, set duration / spawn rate / host, hit **▶ Run**. |
 | **Live Run** | Real-time charts (throughput & VUs, p95 & failures/s), per-endpoint table, and a live log. |
@@ -71,8 +71,15 @@ them for full **custom VU control** ("run any test at any scale").
 | **API CRUD** | `BookingCrudUser` | Weighted mix of **C**reate (POST) · **R**ead (GET id) · List (GET) · **U**pdate (PUT) · **P**atch (PATCH) · **D**elete (DELETE). |
 | **User Journey** | `UserJourneyUser` | One full ordered end-to-end journey per user: auth → create → read → update → patch → delete → confirm-404. |
 | **Security Probes** | `SecurityUser` | Non-destructive checks: auth bypass, unauthenticated writes/deletes, SQL-injection in filters, malformed payloads, stored-XSS round-trip. A probe goes **red only when the API behaves insecurely**. |
+| **Selected APIs** | `SelectiveApiUser` | Hit **only the endpoints you choose** (weighted mix), then run any profile against just that set. Pick them in the UI checklist or with `--endpoints create,read,…`. Keys live in `load/catalog.py:API_ENDPOINTS`. |
 
 All scenarios live in [`load/locustfile.py`](load/locustfile.py).
+
+**Selected-API example:**
+```bash
+# Stress only create + read; all other endpoints are left out.
+python tools/studio.py run --scenario api_select --endpoints create,read --profile stress
+```
 
 ---
 
@@ -153,7 +160,7 @@ scenarios assume the restful-booker contract (`/auth`, `/booking`,
 load/
 ├── catalog.py      ← scenarios, profiles, thresholds, pure load-plan math
 ├── shapes.py       ← Locust LoadTestShape (reads SHREYZEN_* env)
-├── locustfile.py   ← the 3 scenarios (CRUD / journey / security)
+├── locustfile.py   ← the 4 scenarios (CRUD / journey / security / api_select)
 ├── reporting.py    ← JSON + JUnit + Allure writers
 └── engine.py       ← launch Locust, stream live stats, generate reports
 tools/studio.py ← CLI (serve | run) + the launcher dashboard

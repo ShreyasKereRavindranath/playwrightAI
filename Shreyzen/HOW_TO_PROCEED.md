@@ -318,6 +318,41 @@ jobs:
           path: logs_and_reports/
 ```
 
+### Jenkins (no UI required)
+
+The Studio (`:8770`) and dashboard (`:8766`) UIs are **developer conveniences** —
+CI never needs them. Everything runs headless via CLIs, so Jenkins (or any
+runner) drives the framework with plain shell steps:
+
+| Purpose | Command |
+|---|---|
+| Environment check | `python -m tools.doctor` |
+| Functional tests | `pytest -n auto -m smoke --junitxml=logs_and_reports/junit.xml` |
+| Impacted tests only | `python -m tools.impact_run --run --base origin/main` |
+| Load gate | `python tools/studio.py run --scenario crud --profile smoke` |
+| Selected-API perf | `python tools/studio.py run --scenario api_select --endpoints create,read --profile stress` |
+| Regression gate | `python -m tools.check_regressions --gate` |
+
+A ready-to-use declarative pipeline lives at the **repo root**:
+[`../Jenkinsfile`](../Jenkinsfile). It creates a per-build virtualenv, runs the
+API smoke, a load-smoke gate, web + mobile UI (in parallel), and a regression
+gate, then publishes JUnit + archives all reports.
+
+**Setup on Jenkins:**
+1. Create three *Secret text* credentials: `shreyzen-base-url`,
+   `shreyzen-test-user-email`, `shreyzen-test-user-password` (the `Jenkinsfile`
+   binds these via `credentials(...)`).
+2. New Item → *Pipeline* → *Pipeline script from SCM* → point at your repo; the
+   `Jenkinsfile` is at the repository root.
+3. (Optional) Install the **HTML Publisher** plugin and uncomment the
+   `publishHTML` block to surface `report.html` / `extent_report.html` inline.
+4. Ensure agents have Python 3.11+; Chromium OS libs are pulled by
+   `playwright install --with-deps chromium` (needs root, or bake into the agent image).
+
+Reports land under `Shreyzen/logs_and_reports/` (HTML, JUnit, JSON, Allure, and
+the Extent report when `EXTENT_REPORT=true`) and are archived by the pipeline's
+`post` block.
+
 ---
 
 ## PHASE 7 — Adding New Features (AI Agent Checklist)

@@ -50,6 +50,9 @@ class Config:
     # (with an AI diagnosis) automatically.
     QUARANTINE_ENABLED: bool = os.getenv("QUARANTINE_ENABLED", "true").lower() == "true"
     AUTO_QUARANTINE: bool = os.getenv("AUTO_QUARANTINE", "false").lower() == "true"
+    # Persist each failure's message + traceback so `tools/triage.py` can cluster
+    # recurring failures and label their root cause (product/test/flaky/env).
+    FAILURE_TRACKING: bool = os.getenv("FAILURE_TRACKING", "true").lower() == "true"
 
     # ── Capability: Visual Regression ─────────────────────────────────────────
     VISUAL_REGRESSION: bool = os.getenv("VISUAL_REGRESSION", "false").lower() == "true"

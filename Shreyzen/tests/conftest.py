@@ -76,6 +76,17 @@ def _get_flakiness():
     return _flakiness_tracker
 
 
+_failure_store = None
+
+
+def _get_failure_store():
+    global _failure_store
+    if _failure_store is None and Config.FAILURE_TRACKING:
+        from utils.failure_store import FailureStore
+        _failure_store = FailureStore()
+    return _failure_store
+
+
 def _get_perf():
     global _perf_collector
     if _perf_collector is None and Config.PERFORMANCE_METRICS:
@@ -432,6 +443,19 @@ def pytest_runtest_makereport(item, call):
                 "category": _test_category(item),
                 "message": (report.longreprtext[:1500] if report.failed else ""),
             })
+
+        # 5c. Persist failure detail for root-cause clustering (Capability 30).
+        if report.failed and Config.FAILURE_TRACKING:
+            fs = _get_failure_store()
+            if fs:
+                try:
+                    tb = report.longreprtext or ""
+                    msg = tb.strip().splitlines()[-1] if tb.strip() else "test failed"
+                    browser = item.funcargs.get("browser_name", "")
+                    fs.record(item.nodeid, message=msg, traceback=tb,
+                              run_ts=RUN_TS, browser=browser)
+                except Exception as exc:
+                    logger.debug("Failure record skipped: %s", exc)
 
     # ── After all teardowns (context closed, video file finalised) ────────
     if report.when == "teardown":

@@ -22,10 +22,12 @@ runnable locally with no commands to memorise.
 </p>
 
 - **UI tests** (Playwright) split by layer: `api` · `web` · `mobile`
-- **Load testing** (Locust): 6 profiles, custom virtual-user control, live dashboard
-- **Reports everywhere**: HTML · JUnit · JSON · Allure
-- **AI capabilities**: self-healing locators, NL→test generation, auto-repair, test-quality audit, run summaries — **pluggable across OpenAI · Anthropic · Gemini · Ollama · LM Studio · custom endpoints**
-- **CI ready**: GitHub Actions for PR checks, on-demand load, and nightly soaks
+- **Load testing** (Locust): 6 profiles, custom virtual-user control, live dashboard, plus **per-endpoint selection** (pick exactly which APIs to hit)
+- **Reports everywhere**: HTML · JUnit · JSON · Allure · **Extent-style dashboard**
+- **AI capabilities**: self-healing locators (that **auto-PR the Page Object fix**), **self-validating** NL→test generation (auto-repaired until it collects), **flaky-test diagnosis + auto-quarantine**, **failure root-cause clustering** (product/test/flaky/env triage), auto-repair, test-quality audit, run summaries — **pluggable across OpenAI · Anthropic · Gemini · Ollama · LM Studio · custom endpoints**
+- **Agent-native**: an **MCP server** exposes run/generate/heal/diagnose/impact/load as tools, so Claude Code or Cursor can drive the framework conversationally
+- **Drop onto any project**: `shreyzen init` scaffolds config + a starter Page Object/test; `shreyzen doctor` validates your environment
+- **CI ready**: GitHub Actions (PR checks, on-demand load, nightly soaks) **and a Jenkins pipeline**
 - **Zero-friction browsers**: the required browser auto-installs on first run
 
 ---
@@ -41,6 +43,16 @@ and opens the runner. Browsers and the mock API start themselves later from the 
 
 That's it — open the URL, pick tests, hit **Run**. `./run.sh` also forwards args:
 `./run.sh serve --port 9100` or `./run.sh run --scenario crud --profile smoke`.
+
+**Bringing it to your own app?** Scaffold onto any project and validate the setup:
+
+```bash
+./run.sh doctor                                   # check Python, deps, browser, config, LLM
+./run.sh init --url https://your-app.com --clean  # write config/.env + a starter POM/test
+```
+
+`init` reversibly archives the bundled saucedemo demo (`--clean`) so you start
+clean; drop the `--clean` to keep the demo alongside your tests.
 
 <details><summary>No bash? Run the Python launcher directly</summary>
 
@@ -118,7 +130,8 @@ Every run embeds **who ran it, browser, OS/version, and a timezone-aware timesta
 into its reports, and each report is **titled by its test type** (e.g. `WEB_API_…`
 for functional, `LOAD_<scenario>_<profile>` for load). The active LLM provider and
 model are recorded too — or, when none is configured/active, a deterministic
-offline fallback. Load scenarios: `crud` · `journey` · `security`. Profiles:
+offline fallback. Load scenarios: `crud` · `journey` · `security` · `api_select`
+(pick exactly which endpoints to hit). Profiles:
 `smoke` · `load` · `stress` · `spike` · `soak` · `breakpoint` · `custom`.
 Full guide: **[LOAD_TESTING.md](Shreyzen/LOAD_TESTING.md)**.
 
@@ -160,13 +173,21 @@ run.sh    → one-command launcher
 
 ---
 
-## CI (GitHub Actions)
+## CI
+
+**GitHub Actions:**
 
 | Workflow | Trigger | Runs |
 |----------|---------|------|
 | `pr-checks.yml` | PR / push to `main` | API smoke · smoke load · web · mobile |
 | `load-manual.yml` | manual dispatch | any scenario/profile/scale |
 | `nightly-soak.yml` | nightly | soak on crud · journey · security |
+
+**Jenkins:** a ready-to-use declarative [`Jenkinsfile`](Jenkinsfile) at the repo
+root mirrors the PR gate headlessly (no UI needed) — per-build venv, API smoke, a
+load-smoke gate, parallel web + mobile, and a regression gate, publishing JUnit +
+archiving all reports. Setup steps in
+[HOW_TO_PROCEED.md](Shreyzen/HOW_TO_PROCEED.md#jenkins-no-ui-required).
 
 ---
 
