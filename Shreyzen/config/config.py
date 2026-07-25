@@ -44,6 +44,12 @@ class Config:
     FLAKINESS_TRACKING: bool = os.getenv("FLAKINESS_TRACKING", "true").lower() == "true"
     FLAKINESS_WINDOW: int = int(os.getenv("FLAKINESS_WINDOW", "20"))
     FLAKINESS_THRESHOLD: float = float(os.getenv("FLAKINESS_THRESHOLD", "0.15"))
+    # Quarantine: keep known-flaky tests out of the gating run (they still run in
+    # their own lane via `pytest --quarantine-only`). AUTO_QUARANTINE lets the
+    # session-end hook add newly-detected flaky tests to the quarantine list
+    # (with an AI diagnosis) automatically.
+    QUARANTINE_ENABLED: bool = os.getenv("QUARANTINE_ENABLED", "true").lower() == "true"
+    AUTO_QUARANTINE: bool = os.getenv("AUTO_QUARANTINE", "false").lower() == "true"
 
     # ── Capability: Visual Regression ─────────────────────────────────────────
     VISUAL_REGRESSION: bool = os.getenv("VISUAL_REGRESSION", "false").lower() == "true"
