@@ -72,7 +72,8 @@ class BasePage:
             if not self._healing_enabled():
                 raise
             logger.warning("Click timed out; attempting AI self-heal for: %s", locator)
-            self._attempt_ai_heal(self._intent_of(locator), action="click")
+            self._attempt_ai_heal(self._intent_of(locator), action="click",
+                                  original=self._selector_of(locator))
 
     def fill(self, locator: Locator, value: str, timeout: Optional[int] = None) -> None:
         """Clear and fill an input field, waiting for it to be editable first.
@@ -89,7 +90,8 @@ class BasePage:
             if not self._healing_enabled():
                 raise
             logger.warning("Fill timed out; attempting AI self-heal for: %s", locator)
-            self._attempt_ai_heal(self._intent_of(locator), action="fill", value=value)
+            self._attempt_ai_heal(self._intent_of(locator), action="fill", value=value,
+                                  original=self._selector_of(locator))
 
     def type_text(self, locator: Locator, text: str, delay: int = 50) -> None:
         """Type text character-by-character (use for inputs that respond to keystroke events)."""
@@ -210,6 +212,25 @@ class BasePage:
         except Exception:
             return "interact with the intended element"
 
+    @staticmethod
+    def _selector_of(locator: Locator) -> str:
+        """Best-effort extraction of a locator's raw selector string.
+
+        Playwright's Locator repr looks like `<Locator ... selector='<sel>'>`;
+        we pull `<sel>` out so the auto-PR tool (tools/heal_pr.py) can find and
+        rewrite exactly that selector in the Page Object. Returns "" if it can't
+        be determined (e.g. get_by_role/get_by_label locators) — the auto-PR tool
+        then reports the healing as needing a manual edit rather than guessing.
+        """
+        import re
+        try:
+            m = re.search(r"selector='(.*)'>?$", str(locator))
+            if m:
+                return m.group(1).rstrip(">").rstrip("'")
+        except Exception:
+            pass
+        return ""
+
     def safe_click(self, locator: Locator, intent: str, timeout: Optional[int] = None) -> None:
         """Click with AI self-healing fallback.
 
@@ -223,7 +244,7 @@ class BasePage:
             locator.click(timeout=t)
         except PlaywrightTimeoutError:
             logger.warning("Locator timed out. Attempting AI self-heal for intent: '%s'", intent)
-            self._attempt_ai_heal(intent, action="click")
+            self._attempt_ai_heal(intent, action="click", original=self._selector_of(locator))
 
     def safe_fill(
         self, locator: Locator, value: str, intent: str, timeout: Optional[int] = None
@@ -236,9 +257,10 @@ class BasePage:
             locator.fill(value, timeout=t)
         except PlaywrightTimeoutError:
             logger.warning("Locator timed out. Attempting AI self-heal for intent: '%s'", intent)
-            self._attempt_ai_heal(intent, action="fill", value=value)
+            self._attempt_ai_heal(intent, action="fill", value=value,
+                                  original=self._selector_of(locator))
 
-    def _attempt_ai_heal(self, intent: str, action: str, value: str = "") -> None:
+    def _attempt_ai_heal(self, intent: str, action: str, value: str = "", original: str = "") -> None:
         """Internal — invoke AI healing module if enabled in config."""
         from config.config import Config
 
@@ -251,7 +273,7 @@ class BasePage:
         from utils.ai_self_heal import AISelfHeal
 
         healer = AISelfHeal(self.page)
-        healed_locator = healer.heal(intent=intent, page_html=self.page.content())
+        healed_locator = healer.heal(intent=intent, page_html=self.page.content(), original=original)
 
         if healed_locator:
             logger.warning(
