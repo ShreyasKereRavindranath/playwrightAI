@@ -84,12 +84,21 @@ class GeneratedArtifact(BaseModel):
     test_path: str
     test_code: str
     generated_by: Literal["llm", "offline"] = "offline"
+    # Populated by write() when the validate-and-repair gate runs (Capability 28);
+    # excluded from serialization so persisted plans stay unchanged.
+    last_validation: Optional[dict] = Field(default=None, exclude=True)
 
-    def write(self, overwrite: bool = False) -> List[str]:
+    def write(self, overwrite: bool = False, repair: Optional[bool] = None) -> List[str]:
         """Write artifacts to disk. Returns the list of paths actually written.
 
         Existing files are never clobbered unless overwrite=True — the framework
         treats generated code as a starting point for human review.
+
+        After writing, the freshly-written files are validated with
+        `pytest --collect-only` and repaired by the LLM on failure (Capability 28),
+        gated by Config.NL_REPAIR_ENABLED. Pass repair=True/False to override.
+        The outcome is recorded on `self.last_validation` (best-effort — a
+        validation error never breaks the write).
         """
         written: List[str] = []
         if self.page_object_path and self.page_object_code:
@@ -103,7 +112,37 @@ class GeneratedArtifact(BaseModel):
             test.parent.mkdir(parents=True, exist_ok=True)
             test.write_text(self.test_code, encoding="utf-8")
             written.append(str(test))
+
+        self._maybe_repair(written, repair)
         return written
+
+    def _maybe_repair(self, written: List[str], repair: Optional[bool]) -> None:
+        """Validate-and-repair the written files; record self.last_validation."""
+        if str(Path(self.test_path)) not in written:
+            return  # only validate when we actually wrote the test
+        try:
+            from config.config import Config
+            do_repair = Config.NL_REPAIR_ENABLED if repair is None else repair
+            if not do_repair:
+                return
+            from utils import generation_validator as gv
+            files = []
+            if (self.page_object_path and self.page_object_code
+                    and str(Path(self.page_object_path)) in written):
+                files.append(gv.GenFile(path=self.page_object_path,
+                                        code=self.page_object_code, kind="page"))
+            files.append(gv.GenFile(path=self.test_path, code=self.test_code, kind="test"))
+            outcome = gv.repair_generation(
+                files, gv.make_llm_repair_fn(), max_attempts=Config.NL_REPAIR_ATTEMPTS)
+            for f in files:  # reflect any repaired code back onto the artifact
+                if f.kind == "test":
+                    self.test_code = f.code
+                elif f.kind == "page":
+                    self.page_object_code = f.code
+            self.last_validation = {"ok": outcome.ok, "repairs": outcome.repairs,
+                                    "error": outcome.last_error if not outcome.ok else ""}
+        except Exception:  # pragma: no cover - defensive; never break the write
+            self.last_validation = None
 
 
 # ── Healer outputs ─────────────────────────────────────────────────────────

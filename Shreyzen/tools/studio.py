@@ -81,7 +81,7 @@ except ImportError:
     print("Missing dependencies. Run: pip install -r requirements.txt")
     sys.exit(1)
 
-from load.catalog import PROFILES, SCENARIOS, resolve_params
+from load.catalog import PROFILES, SCENARIOS, API_ENDPOINTS, resolve_params
 from load.engine import LoadRunner, list_runs, run_blocking
 from tools import functional_engine as fe
 from utils import process_registry
@@ -113,6 +113,56 @@ _runner = LoadRunner()
 _func_runner = fe.FunctionalRunner()
 
 
+class _Recorder:
+    """Owns at most one active codegen recording; exposes a JSON snapshot."""
+
+    def __init__(self):
+        import threading
+        self._lock = threading.Lock()
+        self._thread = None
+        self.state = {"status": "idle"}
+
+    def is_active(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self, url: str, page_name: str, with_test: bool) -> None:
+        import threading
+        if self.is_active():
+            raise RuntimeError("A recording is already in progress.")
+        self.state = {"status": "recording", "url": url, "page_name": page_name,
+                      "written": [], "errors": [], "page_object": "", "test": ""}
+        self._thread = threading.Thread(
+            target=self._run, args=(url, page_name, with_test), daemon=True)
+        self._thread.start()
+
+    def _run(self, url, page_name, with_test):
+        from tools import record_generate as rg
+        try:
+            raw = rg.launch_codegen(url)
+            with self._lock:
+                self.state["status"] = "generating"
+            out = rg.convert_recording(raw, page_name, with_test=with_test, write=True)
+            with self._lock:
+                self.state.update({
+                    "status": "completed", "page_object": out["page_object"],
+                    "test": out.get("test", ""), "written": out.get("written", []),
+                    "errors": out.get("errors", []),
+                    "page_path": out.get("page_path"), "test_path": out.get("test_path"),
+                    "validation": out.get("validation"),
+                })
+        except Exception as exc:
+            with self._lock:
+                self.state.update({"status": "failed", "errors": [str(exc)]})
+
+    def snapshot(self) -> dict:
+        import json as _json
+        with self._lock:
+            return _json.loads(_json.dumps(self.state, default=str))
+
+
+_recorder = _Recorder()
+
+
 # ── API models ───────────────────────────────────────────────────────────────
 
 class RunRequest(BaseModel):
@@ -122,6 +172,7 @@ class RunRequest(BaseModel):
     duration: int | None = None
     spawn_rate: float | None = None
     host: str = _DEFAULT_HOST
+    endpoints: list[str] | None = None
 
 
 class FunctionalRequest(BaseModel):
@@ -137,6 +188,20 @@ class FunctionalRequest(BaseModel):
 
 class LLMSelectRequest(BaseModel):
     name: str
+
+
+class RecordRequest(BaseModel):
+    url: str
+    page_name: str
+    with_test: bool = True
+
+
+class GenerateRequest(BaseModel):
+    scenario: str
+    page: str | None = None
+    feature: str | None = None
+    test_only: bool = False
+    write: bool = True
 
 
 # ── API endpoints ────────────────────────────────────────────────────────────
@@ -155,6 +220,11 @@ def api_catalog():
              "max_fail_ratio": p.max_fail_ratio, "p95_budget_ms": p.p95_budget_ms}
             for p in PROFILES.values()
         ],
+        "endpoints": [
+            {"key": e.key, "label": e.label, "method": e.method, "path": e.path,
+             "weight": e.weight}
+            for e in API_ENDPOINTS.values()
+        ],
         "defaults": {"host": _DEFAULT_HOST},
     }
 
@@ -168,6 +238,7 @@ def api_run(req: RunRequest):
             req.scenario, req.profile,
             users=req.users, duration=req.duration,
             spawn_rate=req.spawn_rate, host=req.host,
+            endpoints=req.endpoints,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -283,6 +354,129 @@ def api_tests():
             "defaults": {"web_url": _DEFAULT_WEB_URL, "api_host": _DEFAULT_HOST}}
 
 
+@app.get("/api/impact")
+def api_impact(base: str = "HEAD"):
+    """Which test files are impacted by the current git changes (import graph)."""
+    from utils.test_impact import analyze_impact
+    return analyze_impact(base).as_dict()
+
+
+@app.post("/api/record/start")
+def api_record_start(req: RecordRequest):
+    """Launch Playwright codegen; on close, generate a POM (+ smoke test)."""
+    name = "".join(c for c in req.page_name.strip().lower().replace(" ", "_")
+                   if c.isalnum() or c == "_")
+    if not name:
+        raise HTTPException(status_code=400, detail="A valid page name is required.")
+    if not req.url.strip():
+        raise HTTPException(status_code=400, detail="A URL is required.")
+    try:
+        _recorder.start(req.url.strip(), name, req.with_test)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"status": "recording", "page_name": name}
+
+
+@app.get("/api/record/state")
+def api_record_state():
+    """Live snapshot of the current/last recording + generation."""
+    return _recorder.snapshot()
+
+
+@app.get("/api/db/runs")
+def api_db_runs(kind: str | None = None, limit: int = 100):
+    """Run history from the central results DB (survives artifact pruning)."""
+    from utils import results_db
+    return {"runs": results_db.list_runs(kind=kind, limit=limit),
+            "stats": results_db.stats()}
+
+
+@app.get("/api/db/run/{run_id}")
+def api_db_run(run_id: str):
+    from utils import results_db
+    run = results_db.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found in DB")
+    return run
+
+
+@app.post("/api/db/backfill")
+def api_db_backfill():
+    from utils import results_db
+    return results_db.backfill_from_files()
+
+
+@app.post("/api/generate")
+def api_generate(req: GenerateRequest):
+    """Generate a Page Object (+ test) from a plain-English scenario."""
+    scenario = (req.scenario or "").strip()
+    if not scenario:
+        raise HTTPException(status_code=400, detail="A scenario description is required.")
+    from utils.llm_client import LLMClient
+    llm = LLMClient()
+    if not llm.available:
+        raise HTTPException(status_code=503, detail="No LLM provider configured.")
+    from tools import generate_test as gt
+    page = (req.page or gt._infer_page(scenario)).strip()
+    feature = (req.feature or page).strip()
+    fixture = f"{page}_page" if page else "page"
+    po = ""
+    if not req.test_only:
+        po = llm.complete(
+            prompt=gt._PAGE_OBJECT_PROMPT.format(scenario=scenario, page_name=page),
+            system=gt._SYSTEM, max_tokens=800)
+    test = llm.complete(
+        prompt=gt._TEST_PROMPT.format(scenario=scenario, page_fixture=fixture,
+                                      feature=feature, scenario_snake_case=gt._to_snake(scenario)),
+        system=gt._SYSTEM, max_tokens=800)
+
+    def _strip(code):
+        t = (code or "").strip()
+        if t.startswith("```"):
+            t = "\n".join(l for l in t.splitlines() if not l.strip().startswith("```")).strip()
+        return t
+
+    po, test = _strip(po), _strip(test)
+    written = []
+    validation = None
+    if req.write:
+        from pathlib import Path as _P
+        from utils.generation_validator import GenFile
+        gen_files = []
+        if po:
+            po_dest = _ROOT / f"pages/{page}_page.py"
+            if not po_dest.exists():
+                po_dest.write_text(po); written.append(f"pages/{page}_page.py")
+                gen_files.append(GenFile(path=f"pages/{page}_page.py", code=po, kind="page"))
+        if test:
+            t_dest = _ROOT / f"tests/web/test_{feature}.py"
+            if not t_dest.exists():
+                t_dest.parent.mkdir(parents=True, exist_ok=True)
+                t_dest.write_text(test); written.append(f"tests/web/test_{feature}.py")
+                gen_files.append(GenFile(path=f"tests/web/test_{feature}.py", code=test, kind="test"))
+
+        # Validate & repair the freshly-written files (pytest --collect-only →
+        # LLM self-correct). Best-effort; never fails the request.
+        if gen_files and Config.NL_REPAIR_ENABLED:
+            try:
+                from utils import generation_validator as gv
+                outcome = gv.repair_generation(
+                    gen_files, gv.make_llm_repair_fn(llm),
+                    max_attempts=Config.NL_REPAIR_ATTEMPTS)
+                # Reflect any repaired code back into the response.
+                for f in gen_files:
+                    if f.kind == "page":
+                        po = f.code
+                    elif f.kind == "test":
+                        test = f.code
+                validation = {"ok": outcome.ok, "repairs": outcome.repairs,
+                              "error": outcome.last_error if not outcome.ok else ""}
+            except Exception as exc:  # pragma: no cover - defensive
+                validation = {"ok": None, "repairs": 0, "error": f"validation skipped: {exc}"}
+    return {"page_object": po, "test": test, "page": page, "feature": feature,
+            "written": written, "validation": validation}
+
+
 @app.post("/api/functional/run")
 def api_functional_run(req: FunctionalRequest):
     if _func_runner.is_active():
@@ -345,6 +539,78 @@ def _safe_func_file(run_id: str, filename: str) -> Path:
     if not str(run_dir).startswith(str(_FUNC_RUNS.resolve())):
         raise HTTPException(status_code=400, detail="Invalid run id")
     return run_dir / filename
+
+
+# ── Trace / video artifacts (inline debugging) ──────────────────────────────
+
+@app.get("/api/functional/artifacts/{run_id}")
+def api_functional_artifacts(run_id: str):
+    """List Playwright traces + videos captured for a functional run."""
+    art_dir = _safe_func_file(run_id, "artifacts")
+    traces, videos = [], []
+    if art_dir.exists():
+        for f in sorted(art_dir.iterdir()):
+            if f.name.endswith("__trace.zip"):
+                traces.append({"name": f.name,
+                               "test": f.name[:-len("__trace.zip")],
+                               "size_kb": round(f.stat().st_size / 1024, 1)})
+            elif f.suffix.lower() in (".webm", ".mp4"):
+                videos.append({"name": f.name,
+                               "size_kb": round(f.stat().st_size / 1024, 1)})
+    return {"run_id": run_id, "traces": traces, "videos": videos}
+
+
+def _safe_artifact(run_id: str, name: str) -> Path:
+    """Resolve an artifact file, guarding against path traversal."""
+    art_dir = _safe_func_file(run_id, "artifacts").resolve()
+    path = (art_dir / name).resolve()
+    if not str(path).startswith(str(art_dir)):
+        raise HTTPException(status_code=400, detail="Invalid artifact name")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return path
+
+
+@app.get("/fartifact/{run_id}/{name}")
+def functional_artifact(run_id: str, name: str):
+    """Serve a trace.zip (download) or video (inline playback)."""
+    path = _safe_artifact(run_id, name)
+    if name.endswith(".zip"):
+        return FileResponse(str(path), media_type="application/zip", filename=name)
+    media = "video/webm" if path.suffix.lower() == ".webm" else "video/mp4"
+    return FileResponse(str(path), media_type=media)
+
+
+@app.get("/ftrace/{run_id}/{name}", response_class=HTMLResponse)
+def functional_trace_viewer(run_id: str, name: str):
+    """
+    Open a trace in the Playwright Trace Viewer. Tries the local viewer
+    (`playwright show-trace`) which opens a full-featured window on the host;
+    falls back to instructions if Playwright's CLI isn't available.
+    """
+    path = _safe_artifact(run_id, name)
+    launched = False
+    try:
+        subprocess.Popen([sys.executable, "-m", "playwright", "show-trace", str(path)],
+                         cwd=str(_ROOT))
+        launched = True
+    except Exception:
+        launched = False
+    dl = f"/fartifact/{run_id}/{name}"
+    if launched:
+        body = ("<h3>Trace Viewer opening…</h3>"
+                "<p>The Playwright Trace Viewer is launching in a native window "
+                "on the machine running Studio.</p>"
+                f"<p>If it didn't appear, <a href='{dl}'>download the trace</a> and "
+                "drop it on <a href='https://trace.playwright.dev' target='_blank'>"
+                "trace.playwright.dev</a>.</p>")
+    else:
+        body = ("<h3>Open this trace</h3>"
+                f"<p><a href='{dl}'>Download {name}</a>, then either run "
+                f"<code>playwright show-trace &lt;file&gt;</code> locally or drop it on "
+                "<a href='https://trace.playwright.dev' target='_blank'>"
+                "trace.playwright.dev</a>.</p>")
+    return HTMLResponse(f"<body style='font-family:system-ui;padding:2rem'>{body}</body>")
 
 
 # ── LLM provider endpoints ─────────────────────────────────────────────────
@@ -480,7 +746,21 @@ def api_compare():
     return {"runs": runs}
 
 
-@app.get("/download/{scope}/{run_id}/{kind}")
+@app.get("/api/retention/preview")
+def api_retention_preview():
+    """Show what auto-pruning would drop right now (deletes nothing)."""
+    from utils.retention import prune_reports
+    return prune_reports(dry_run=True).as_dict()
+
+
+@app.post("/api/retention/prune")
+def api_retention_prune():
+    """Enforce retention caps now and report what was freed."""
+    from utils.retention import prune_reports
+    return prune_reports(dry_run=False).as_dict()
+
+
+
 def download(scope: str, run_id: str, kind: str):
     """Download a report artifact as an attachment."""
     base = _RUNS_DIR if scope == "load" else _FUNC_RUNS if scope == "functional" else None
@@ -558,6 +838,7 @@ def _cmd_run(args):
             args.scenario, args.profile,
             users=args.users, duration=args.duration,
             spawn_rate=args.spawn_rate, host=args.host,
+            endpoints=args.endpoints,
         )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -582,6 +863,11 @@ def main():
     p_run.add_argument("--duration", type=int, default=None, help="seconds")
     p_run.add_argument("--spawn-rate", type=float, default=None, dest="spawn_rate")
     p_run.add_argument("--host", default=_DEFAULT_HOST)
+    p_run.add_argument(
+        "--endpoints", type=lambda s: [x.strip() for x in s.split(",") if x.strip()],
+        default=None,
+        help="comma-separated API endpoint keys for the api_select scenario "
+             f"(choices: {', '.join(API_ENDPOINTS)})")
     p_run.set_defaults(func=_cmd_run)
 
     # `init` and `doctor` are thin passthroughs to their own modules so they're
@@ -680,6 +966,16 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);displ
 .card-blurb{font-size:12px;color:var(--muted);line-height:1.5}
 .card-meta{font-size:11px;color:var(--blue);margin-top:9px;font-weight:600}
 .long-tag{display:inline-block;font-size:10px;font-weight:700;color:#b45309;background:rgba(245,158,11,.14);padding:2px 7px;border-radius:10px;margin-left:6px}
+.ep-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px}
+.ep-item{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--card);border:1px solid var(--border);border-radius:10px;cursor:pointer;font-size:13px;color:var(--text)}
+.ep-item:hover{border-color:var(--active)}
+.ep-item input{cursor:pointer}
+.ep-method{font-size:10px;font-weight:800;padding:2px 6px;border-radius:6px;background:var(--surface2);color:var(--muted);min-width:52px;text-align:center}
+.ep-GET{color:#0369a1;background:rgba(3,105,161,.12)}.ep-POST{color:#15803d;background:rgba(21,128,61,.12)}
+.ep-PUT{color:#b45309;background:rgba(180,83,9,.12)}.ep-PATCH{color:#7c3aed;background:rgba(124,58,237,.12)}
+.ep-DELETE{color:#b91c1c;background:rgba(185,28,28,.12)}
+.mini-btn{font-size:11px;font-weight:600;padding:4px 10px;border:1px solid var(--border);background:var(--card);color:var(--muted);border-radius:8px;cursor:pointer;margin-right:6px}
+.mini-btn:hover{border-color:var(--active);color:var(--active)}
 .controls{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);padding:20px;margin-bottom:20px}
 .ctrl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:18px;align-items:start}
 .field{min-width:0}
@@ -783,11 +1079,48 @@ code{background:var(--surface2);padding:2px 6px;border-radius:4px;font-size:12px
 
   <!-- FUNCTIONAL -->
   <div class="page active" id="p-functional">
+    <div class="section-title">0 · Record a new test
+      <span class="info" title="Opens Playwright's recorder in a real browser. Click through your flow, close the browser, and Studio generates a Page Object (+ smoke test) in the framework's style. Runs on the machine hosting Studio.">i</span>
+    </div>
+    <div class="controls">
+      <div class="ctrl-grid">
+        <div class="field"><label>Start URL</label>
+          <input type="text" id="rec-url" placeholder="https://www.saucedemo.com/"></div>
+        <div class="field"><label>Page name<span class="info" title="e.g. 'checkout' → pages/checkout_page.py + tests/web/test_checkout.py">i</span></label>
+          <input type="text" id="rec-name" placeholder="checkout"></div>
+      </div>
+      <label class="cbox" style="display:flex;align-items:center;gap:8px;margin-top:8px"><input type="checkbox" id="rec-test" checked style="width:16px;height:16px;margin:0"> Also generate a smoke test</label>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:12px">
+        <button id="rec-btn" onclick="startRecord()" style="padding:9px 16px;border:none;border-radius:8px;background:var(--active);color:#fff;cursor:pointer;font-weight:600">● Record flow</button>
+        <span class="hint" id="rec-hint"></span>
+      </div>
+      <div id="rec-out" style="display:none;margin-top:12px"></div>
+    </div>
+
+    <div class="section-title">0b · Describe a test (natural language)
+      <span class="info" title="Describe a scenario in plain English; the configured LLM generates a Page Object + pytest test in the framework's style.">i</span>
+    </div>
+    <div class="controls">
+      <div class="field"><label>Scenario</label>
+        <input type="text" id="gen-scenario" placeholder="User cannot checkout with an empty cart"></div>
+      <div class="ctrl-grid" style="margin-top:8px">
+        <div class="field"><label>Page name (optional)</label><input type="text" id="gen-page" placeholder="checkout"></div>
+        <div class="field"><label>Feature (optional)</label><input type="text" id="gen-feature" placeholder="checkout"></div>
+      </div>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:12px">
+        <button id="gen-btn" onclick="generateTest()" style="padding:9px 16px;border:none;border-radius:8px;background:var(--active);color:#fff;cursor:pointer;font-weight:600">✨ Generate</button>
+        <span class="hint" id="gen-hint"></span>
+      </div>
+      <div id="gen-out" style="display:none;margin-top:12px"></div>
+    </div>
+
     <div class="section-title">1 · Pick tests (api · web · mobile)</div>
     <div class="controls" style="padding:0">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)">
         <input type="text" id="test-filter" placeholder="Filter tests…" oninput="renderTree()"
                style="flex:1;max-width:360px;padding:8px 11px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+        <button onclick="selectImpacted()" title="Select only tests impacted by your current git changes (import-graph analysis)"
+               style="margin-left:8px;padding:8px 11px;border:1px solid var(--border);border-radius:8px;background:var(--card);cursor:pointer;font-size:12.5px">🎯 Changed only</button>
         <span class="hint" id="sel-count">0 selected</span>
       </div>
       <div id="test-tree" style="max-height:320px;overflow-y:auto;overflow-x:hidden;padding:8px 16px"><div class="spin"></div></div>
@@ -836,6 +1169,7 @@ code{background:var(--surface2);padding:2px 6px;border-radius:4px;font-size:12px
 
     <div class="section-title">3 · Results</div>
     <div class="verdict" id="f-verdict"></div>
+    <div id="f-artifacts" style="display:none"></div>
     <div class="kpi-row" style="grid-template-columns:repeat(5,1fr)">
       <div class="kpi"><div class="kv" id="fk-total">–</div><div class="kl">Tests</div></div>
       <div class="kpi"><div class="kv" id="fk-passed" style="color:var(--pass)">–</div><div class="kl">Passed</div></div>
@@ -865,6 +1199,16 @@ code{background:var(--surface2);padding:2px 6px;border-radius:4px;font-size:12px
   <div class="page" id="p-launch">
     <div class="section-title">1 · Pick a test</div>
     <div class="cards" id="scenario-cards"></div>
+    <div id="endpoint-picker" style="display:none;margin:-4px 0 8px">
+      <div class="section-title" style="font-size:13px">1b · Select API endpoints
+        <span class="info" title="For the 'Selected APIs' scenario: choose exactly which endpoints the load hits. The chosen profile below decides the load shape (smoke/load/stress/…).">i</span>
+      </div>
+      <div id="endpoint-list" class="ep-list"></div>
+      <div style="margin-top:6px">
+        <button class="mini-btn" type="button" onclick="epAll(true)">Select all</button>
+        <button class="mini-btn" type="button" onclick="epAll(false)">Clear</button>
+      </div>
+    </div>
     <div class="section-title">2 · Pick a load profile</div>
     <div class="cards" id="profile-cards"></div>
     <div class="section-title">3 · Tune &amp; run</div>
@@ -1010,11 +1354,18 @@ async function loadCatalog(){
       <div class="card-h"><span class="card-icon">${p.icon}</span><span class="card-title">${p.label}${p.long_running?'<span class="long-tag">LONG</span>':''}</span></div>
       <div class="card-blurb">${p.blurb}</div>
       <div class="card-meta">${p.default_users} VUs · ${p.default_duration}s · ≤${(p.max_fail_ratio*100).toFixed(0)}% fail · p95≤${p.p95_budget_ms}ms</div></div>`).join('');
+  $('endpoint-list').innerHTML=(CATALOG.endpoints||[]).map(e=>`
+    <label class="ep-item"><input type="checkbox" class="ep-cb" value="${e.key}" checked>
+      <span class="ep-method ep-${e.method}">${e.method}</span> ${e.path}</label>`).join('');
   pickScenario('crud'); pickProfile('smoke');
 }
 
+function epAll(on){document.querySelectorAll('.ep-cb').forEach(c=>c.checked=on);}
+function selectedEndpoints(){return [...document.querySelectorAll('.ep-cb')].filter(c=>c.checked).map(c=>c.value);}
+
 function pickScenario(k){SEL_SCENARIO=k;
   CATALOG.scenarios.forEach(s=>$('sc-'+s.key).classList.toggle('sel',s.key===k));
+  $('endpoint-picker').style.display=(k==='api_select')?'block':'none';
   updateHint();}
 
 function pickProfile(k){SEL_PROFILE=k;
@@ -1034,6 +1385,11 @@ async function startRun(){
   const body={scenario:SEL_SCENARIO,profile:SEL_PROFILE,
     users:+$('users').value,duration:+$('duration').value,
     spawn_rate:+$('spawn').value,host:$('host').value.trim()};
+  if(SEL_SCENARIO==='api_select'){
+    const eps=selectedEndpoints();
+    if(!eps.length){alert('Select at least one API endpoint to run.');return;}
+    body.endpoints=eps;
+  }
   const res=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!res.ok){alert('Could not start: '+(await res.json()).detail);return;}
   resetCharts(); go('live'); startPolling();
@@ -1181,7 +1537,96 @@ function toggleTreeGroup(layer){
 }
 function toggleOne(nodeid,on){on?SELECTED.add(nodeid):SELECTED.delete(nodeid);renderTree();}
 function toggleLayer(layer,on){(TESTS[layer]||[]).forEach(t=>on?SELECTED.add(t.nodeid):SELECTED.delete(t.nodeid));renderTree();}
+
+async function selectImpacted(){
+  try{
+    const r=await fetch('/api/impact').then(r=>r.json());
+    SELECTED.clear();
+    const allNodes=['api','web','mobile'].flatMap(l=>TESTS[l]||[]);
+    if(r.run_all){
+      allNodes.forEach(t=>SELECTED.add(t.nodeid));
+      $('f-hint').textContent='Core change — selected the full suite. '+(r.reason||'');
+    }else if(r.impacted_tests&&r.impacted_tests.length){
+      const files=new Set(r.impacted_tests);
+      // nodeid looks like "tests/web/test_x.py::test_fn[chromium]" → match by file prefix
+      allNodes.forEach(t=>{const file=t.nodeid.split('::')[0]; if(files.has(file)) SELECTED.add(t.nodeid);});
+      $('f-hint').textContent=`Selected ${SELECTED.size} test(s) from ${files.size} impacted file(s). `+(r.reason||'');
+    }else{
+      $('f-hint').textContent='No tests impacted by current changes. '+(r.reason||'');
+    }
+    renderTree();
+  }catch(e){$('f-hint').textContent='Impact analysis failed: '+e;}
+}
 function toggleApiUrl(){$('f-api-url-field').style.display=$('f-api-target').value==='custom'?'':'none';}
+
+let RECPOLL=null;
+async function startRecord(){
+  const url=($('rec-url').value||'').trim(), name=($('rec-name').value||'').trim();
+  if(!url||!name){$('rec-hint').textContent='Enter a start URL and a page name.';return;}
+  $('rec-hint').textContent='';
+  const res=await fetch('/api/record/start',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({url,page_name:name,with_test:$('rec-test').checked})});
+  if(!res.ok){$('rec-hint').textContent='Could not start: '+(await res.json()).detail;return;}
+  $('rec-btn').disabled=true;
+  $('rec-hint').textContent='🎥 Recorder open — click through your flow in the browser, then close it.';
+  if(RECPOLL) clearInterval(RECPOLL);
+  RECPOLL=setInterval(pollRecord,1500);
+}
+async function pollRecord(){
+  const s=await fetch('/api/record/state').then(r=>r.json());
+  if(s.status==='generating') $('rec-hint').textContent='🧠 Converting recording to a Page Object…';
+  if(s.status==='completed'||s.status==='failed'){
+    clearInterval(RECPOLL);RECPOLL=null;$('rec-btn').disabled=false;
+    const out=$('rec-out');out.style.display='block';
+    if(s.status==='failed'){
+      $('rec-hint').textContent='';
+      out.innerHTML=`<div class="verdict fail">❌ ${escapeHtml((s.errors||['Recording failed']).join('; '))}</div>`;
+      return;
+    }
+    $('rec-hint').textContent='';
+    const written=(s.written||[]).map(w=>`<div style="font-size:12px">✅ wrote <code>${escapeHtml(w)}</code></div>`).join('');
+    const errs=(s.errors||[]).map(e=>`<div style="font-size:12px;color:var(--fail)">⚠ ${escapeHtml(e)}</div>`).join('');
+    let vbadge='';
+    if(s.validation){
+      if(s.validation.ok===true) vbadge=`<div style="font-size:12px;color:var(--pass)">✅ collects under pytest${s.validation.repairs?` (after ${s.validation.repairs} AI repair round${s.validation.repairs>1?'s':''})`:''}</div>`;
+      else if(s.validation.ok===false) vbadge=`<div style="font-size:12px;color:var(--fail)">⚠ still fails collection after ${s.validation.repairs} repair round(s) — review before running</div>`;
+    }
+    out.innerHTML=`<div class="verdict pass">✅ Generated from recording</div>${written}${errs}${vbadge}
+      <details style="margin-top:8px"><summary style="cursor:pointer">Page Object</summary>
+        <pre style="max-height:260px;overflow:auto;background:var(--surface2);padding:10px;border-radius:8px;font-size:12px">${escapeHtml(s.page_object||'')}</pre></details>
+      ${s.test?`<details style="margin-top:6px"><summary style="cursor:pointer">Smoke test</summary>
+        <pre style="max-height:260px;overflow:auto;background:var(--surface2);padding:10px;border-radius:8px;font-size:12px">${escapeHtml(s.test)}</pre></details>`:''}
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">Reload the test list to pick the new test.</div>`;
+    loadTests();
+  }
+}
+
+async function generateTest(){
+  const scenario=($('gen-scenario').value||'').trim();
+  if(!scenario){$('gen-hint').textContent='Describe a scenario first.';return;}
+  $('gen-hint').textContent='🧠 Generating…'; $('gen-btn').disabled=true;
+  try{
+    const res=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({scenario,page:$('gen-page').value.trim()||null,feature:$('gen-feature').value.trim()||null,write:true})});
+    if(!res.ok){$('gen-hint').textContent='Failed: '+(await res.json()).detail;$('gen-btn').disabled=false;return;}
+    const s=await res.json();
+    $('gen-hint').textContent='';$('gen-btn').disabled=false;
+    const out=$('gen-out');out.style.display='block';
+    const written=(s.written||[]).map(w=>`<div style="font-size:12px">✅ wrote <code>${escapeHtml(w)}</code></div>`).join('')
+      ||'<div style="font-size:12px;color:var(--muted)">Files already existed — shown below for manual merge.</div>';
+    let vbadge='';
+    if(s.validation){
+      if(s.validation.ok===true) vbadge=`<div style="font-size:12px;color:var(--pass)">✅ collects under pytest${s.validation.repairs?` (after ${s.validation.repairs} AI repair round${s.validation.repairs>1?'s':''})`:''}</div>`;
+      else if(s.validation.ok===false) vbadge=`<div style="font-size:12px;color:var(--fail)">⚠ still fails collection after ${s.validation.repairs} repair round(s) — review before running</div>`;
+    }
+    out.innerHTML=`<div class="verdict pass">✅ Generated</div>${written}${vbadge}
+      ${s.page_object?`<details style="margin-top:8px" open><summary style="cursor:pointer">Page Object</summary>
+        <pre style="max-height:260px;overflow:auto;background:var(--surface2);padding:10px;border-radius:8px;font-size:12px">${escapeHtml(s.page_object)}</pre></details>`:''}
+      ${s.test?`<details style="margin-top:6px" open><summary style="cursor:pointer">Test</summary>
+        <pre style="max-height:260px;overflow:auto;background:var(--surface2);padding:10px;border-radius:8px;font-size:12px">${escapeHtml(s.test)}</pre></details>`:''}`;
+    loadTests();
+  }catch(e){$('gen-hint').textContent='Error: '+e;$('gen-btn').disabled=false;}
+}
 
 async function startFunctional(){
   if(!SELECTED.size){$('f-hint').textContent='Select at least one test.';return;}
@@ -1193,6 +1638,7 @@ async function startFunctional(){
   const res=await fetch('/api/functional/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!res.ok){$('f-hint').textContent='Could not start: '+(await res.json()).detail;return;}
   $('f-verdict').style.display='none'; $('tb-ftests').innerHTML='';
+  $('f-artifacts').style.display='none'; $('f-artifacts').innerHTML='';
   startFPoll();
 }
 async function stopFunctional(){await fetch('/api/functional/stop',{method:'POST'});}
@@ -1242,6 +1688,28 @@ function drawFVerdict(s){
       <a href="/download/functional/${rid}/allure">Allure.zip</a></span></div>`:'';
   v.innerHTML=`${passed?'✅ PASS':'❌ FAIL'} — ${(s.counts||{}).passed||0} passed, ${(s.counts||{}).failed||0} failed, ${(s.counts||{}).skipped||0} skipped. `+
     (s.error?`<span>${escapeHtml(s.error)}</span>`:'')+links;
+  if(rid) loadFArtifacts(rid);
+}
+
+async function loadFArtifacts(rid){
+  const box=$('f-artifacts');
+  try{
+    const a=await fetch('/api/functional/artifacts/'+encodeURIComponent(rid)).then(r=>r.json());
+    const hasAny=(a.traces&&a.traces.length)||(a.videos&&a.videos.length);
+    if(!hasAny){box.style.display='none';box.innerHTML='';return;}
+    let html='<div style="background:var(--card);border-radius:var(--r);box-shadow:var(--sh);padding:14px 16px;margin-bottom:18px">'+
+      '<div style="font-weight:600;margin-bottom:8px">🎬 Debug artifacts</div>';
+    if(a.traces&&a.traces.length){
+      html+='<div style="margin-bottom:6px;color:var(--muted);font-size:12px">Playwright traces (click to open in Trace Viewer):</div>';
+      html+=a.traces.map(t=>`<div style="font-size:12px;margin:3px 0">🔍 <a href="/ftrace/${rid}/${encodeURIComponent(t.name)}" target="_blank">${escapeHtml(t.test)}</a> · <a href="/fartifact/${rid}/${encodeURIComponent(t.name)}">download (${t.size_kb} KB)</a></div>`).join('');
+    }
+    if(a.videos&&a.videos.length){
+      html+='<div style="margin:10px 0 6px;color:var(--muted);font-size:12px">Videos:</div>';
+      html+=a.videos.map(vd=>`<div style="margin:6px 0"><div style="font-size:12px;margin-bottom:3px">${escapeHtml(vd.name)}</div><video controls preload="metadata" style="max-width:100%;border-radius:6px" src="/fartifact/${rid}/${encodeURIComponent(vd.name)}"></video></div>`).join('');
+    }
+    html+='</div>';
+    box.innerHTML=html; box.style.display='block';
+  }catch(e){box.style.display='none';}
 }
 
 async function loadFHistory(){

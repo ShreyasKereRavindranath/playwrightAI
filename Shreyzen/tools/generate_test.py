@@ -71,6 +71,10 @@ def main():
     parser.add_argument("--output", default="", help="Output test file path (optional)")
     parser.add_argument("--page-object-only", action="store_true", help="Generate Page Object only")
     parser.add_argument("--test-only", action="store_true", help="Generate test only")
+    parser.add_argument("--no-repair", action="store_true",
+                        help="Skip the validate-and-repair loop (pytest --collect-only + LLM self-correct)")
+    parser.add_argument("--repair-attempts", type=int, default=None,
+                        help="Max LLM repair rounds (default: Config.NL_REPAIR_ATTEMPTS)")
     args = parser.parse_args()
 
     llm = LLMClient()
@@ -85,6 +89,11 @@ def main():
 
     print(f"\n🔧 Generating test artifacts for: '{scenario}'\n")
 
+    # Track files we actually wrote so the repair loop can validate them together.
+    from utils.generation_validator import GenFile
+
+    written: list = []
+
     if not args.test_only:
         print("── Page Object ──────────────────────────────")
         po_code = llm.complete(
@@ -96,6 +105,7 @@ def main():
         po_path = Path(f"pages/{page_name}_page.py")
         if not po_path.exists():
             po_path.write_text(po_code)
+            written.append(GenFile(path=str(po_path), code=po_code, kind="page"))
             print(f"\n✅ Written to {po_path}\n")
         else:
             print(f"\n⚠  {po_path} already exists — printed above for manual merge.\n")
@@ -119,11 +129,35 @@ def main():
         if not dest.exists():
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(test_code)
+            written.append(GenFile(path=str(dest), code=test_code, kind="test"))
             print(f"\n✅ Written to {dest}\n")
         else:
             print(f"\n⚠  {dest} already exists — printed above for manual merge.\n")
 
+    _maybe_repair(written, no_repair=args.no_repair, attempts=args.repair_attempts)
+
     print("Done. Review generated code before committing.")
+
+
+def _maybe_repair(written: list, *, no_repair: bool, attempts) -> None:
+    """Validate the freshly-written files and let the LLM self-correct on failure."""
+    from config.config import Config
+    from utils import generation_validator as gv
+
+    if no_repair or not Config.NL_REPAIR_ENABLED or not written:
+        return
+    max_attempts = attempts if attempts is not None else Config.NL_REPAIR_ATTEMPTS
+
+    print("── Validate & repair (pytest --collect-only) ─")
+    outcome = gv.repair_generation(
+        written, gv.make_llm_repair_fn(), max_attempts=max_attempts, log=print)
+    if outcome.ok:
+        print(f"✅ Generated files collect cleanly "
+              f"({outcome.repairs} repair round(s)).\n")
+    else:
+        print("⚠  Files still fail collection after "
+              f"{outcome.repairs} repair round(s) — review before running:\n"
+              f"   {outcome.last_error.splitlines()[-1] if outcome.last_error else ''}\n")
 
 
 def _infer_page(scenario: str) -> str:
