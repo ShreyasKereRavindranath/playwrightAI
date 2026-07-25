@@ -9,6 +9,8 @@
 #
 #   ./run.sh                                      # start the UI → http://127.0.0.1:8770
 #   ./run.sh serve --port 9100                    # UI on a custom port
+#   ./run.sh init --url https://myapp.com         # scaffold onto a new project
+#   ./run.sh doctor                               # validate the environment
 #   ./run.sh run --scenario crud --profile smoke  # headless load run (CI-style)
 #
 set -euo pipefail

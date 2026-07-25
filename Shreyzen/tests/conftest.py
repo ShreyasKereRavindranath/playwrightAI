@@ -33,10 +33,20 @@ import pytest
 from playwright.sync_api import Page
 
 from config.config import Config
-from pages.cart_page import CartPage
-from pages.checkout_page import CheckoutPage
-from pages.inventory_page import InventoryPage
-from pages.login_page import LoginPage
+
+# ── Bundled demo Page Objects (saucedemo) ──────────────────────────────────
+# These are imported defensively so the framework core never hard-depends on
+# the demo. `shreyzen init --clean` archives them to examples/legacy_saucedemo/;
+# when they're absent the demo fixtures below simply aren't registered, and the
+# rest of the framework (every capability, your own pages/tests) is unaffected.
+try:
+    from pages.cart_page import CartPage
+    from pages.checkout_page import CheckoutPage
+    from pages.inventory_page import InventoryPage
+    from pages.login_page import LoginPage
+    _DEMO_PAGES_AVAILABLE = True
+except ImportError:
+    _DEMO_PAGES_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -519,34 +529,40 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 # ── Page Object fixtures ───────────────────────────────────────────────────
+# Registered only when the bundled saucedemo demo pages are present (see the
+# defensive import at the top). Your own tests should instantiate their Page
+# Objects directly or define fixtures in their own conftest — these exist purely
+# to support the shipped demo suite.
 
-@pytest.fixture
-def login_page(page: Page) -> LoginPage:
-    return LoginPage(page)
+if _DEMO_PAGES_AVAILABLE:
 
-
-@pytest.fixture
-def inventory_page(page: Page) -> InventoryPage:
-    return InventoryPage(page)
-
-
-@pytest.fixture
-def cart_page(page: Page) -> CartPage:
-    return CartPage(page)
+    @pytest.fixture
+    def login_page(page: Page) -> "LoginPage":
+        return LoginPage(page)
 
 
-@pytest.fixture
-def checkout_page(page: Page) -> CheckoutPage:
-    return CheckoutPage(page)
+    @pytest.fixture
+    def inventory_page(page: Page) -> "InventoryPage":
+        return InventoryPage(page)
 
 
-@pytest.fixture
-def authenticated_page(page: Page) -> Page:
-    """Return a page already logged in (sitting on inventory)."""
-    lp = LoginPage(page)
-    lp.navigate()
-    lp.login(Config.TEST_USER_EMAIL, Config.TEST_USER_PASSWORD)
-    return page
+    @pytest.fixture
+    def cart_page(page: Page) -> "CartPage":
+        return CartPage(page)
+
+
+    @pytest.fixture
+    def checkout_page(page: Page) -> "CheckoutPage":
+        return CheckoutPage(page)
+
+
+    @pytest.fixture
+    def authenticated_page(page: Page) -> Page:
+        """Return a page already logged in (sitting on inventory)."""
+        lp = LoginPage(page)
+        lp.navigate()
+        lp.login(Config.TEST_USER_EMAIL, Config.TEST_USER_PASSWORD)
+        return page
 
 
 # ── Test data fixtures ─────────────────────────────────────────────────────
