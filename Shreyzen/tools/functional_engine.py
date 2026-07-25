@@ -216,6 +216,9 @@ class FunctionalRunner:
     def _run(self, selection: list[str], target: dict, run_dir: Path):
         try:
             env, self._mock = _build_env(selection, target, self._log)
+            # Route Playwright traces/videos into this run's own folder so the
+            # UI can serve them inline (see conftest ARTIFACT_DIR).
+            env["SHREYZEN_ARTIFACT_DIR"] = str(run_dir / "artifacts")
             # Type prefix (WEB_/API_/MOBILE_) drives the report title + run history.
             prefix = type_prefix(selection)
             report_title = f"{prefix}Functional Report — {self.state['run_id']}"
@@ -307,6 +310,12 @@ class FunctionalRunner:
             "timestamp": datetime.now().isoformat(timespec="seconds"),
         }
         (run_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+        # Persist a compact row to the central results DB (survives artifact pruning).
+        try:
+            from utils import results_db
+            results_db.record_functional(summary)
+        except Exception:
+            pass
         self._set(
             status="completed" if junit["tests"] else "failed",
             ended_at=ended,
@@ -325,6 +334,9 @@ class FunctionalRunner:
         self._log(f"Done — {summary['counts']['passed']} passed, "
                   f"{summary['counts']['failed']} failed, "
                   f"{summary['counts']['skipped']} skipped.")
+        # Enforce retention caps so run artifacts don't grow unbounded.
+        from utils.retention import auto_prune
+        auto_prune(log=self._log)
 
 
 def list_runs(limit: int = 50) -> list[dict]:

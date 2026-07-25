@@ -168,6 +168,17 @@ def api_perf_tests():
     """)
 
 
+@app.get("/api/regressions")
+def api_regressions():
+    """Regressions in the latest run vs the median of prior runs."""
+    try:
+        from utils.regression_detector import detect_with_config
+        return detect_with_config().as_dict()
+    except Exception as exc:
+        return {"latest_run": None, "baseline_runs": 0,
+                "has_regressions": False, "regressions": [], "error": str(exc)}
+
+
 @app.get("/api/contracts")
 def api_contracts():
     """Read latest API test results from runs/*.json if present."""

@@ -58,19 +58,38 @@ class BasePage:
     # ── Core Interactions ─────────────────────────────────────────────────────
 
     def click(self, locator: Locator, timeout: Optional[int] = None) -> None:
-        """Wait for element to be visible and enabled, then click."""
+        """Wait for element to be visible and enabled, then click.
+
+        When ENABLE_AI_HEALING is on, a timeout triggers a live locator-recovery
+        attempt (DOM snapshot → LLM → retry) instead of failing immediately.
+        """
         t = timeout or self._timeout
         logger.debug("Clicking: %s", locator)
-        locator.wait_for(state="visible", timeout=t)
-        locator.click(timeout=t)
+        try:
+            locator.wait_for(state="visible", timeout=t)
+            locator.click(timeout=t)
+        except PlaywrightTimeoutError:
+            if not self._healing_enabled():
+                raise
+            logger.warning("Click timed out; attempting AI self-heal for: %s", locator)
+            self._attempt_ai_heal(self._intent_of(locator), action="click")
 
     def fill(self, locator: Locator, value: str, timeout: Optional[int] = None) -> None:
-        """Clear and fill an input field, waiting for it to be editable first."""
+        """Clear and fill an input field, waiting for it to be editable first.
+
+        Self-heals on timeout when ENABLE_AI_HEALING is on (see click()).
+        """
         t = timeout or self._timeout
         logger.debug("Filling '%s' into: %s", value, locator)
-        locator.wait_for(state="visible", timeout=t)
-        locator.clear()
-        locator.fill(value, timeout=t)
+        try:
+            locator.wait_for(state="visible", timeout=t)
+            locator.clear()
+            locator.fill(value, timeout=t)
+        except PlaywrightTimeoutError:
+            if not self._healing_enabled():
+                raise
+            logger.warning("Fill timed out; attempting AI self-heal for: %s", locator)
+            self._attempt_ai_heal(self._intent_of(locator), action="fill", value=value)
 
     def type_text(self, locator: Locator, text: str, delay: int = 50) -> None:
         """Type text character-by-character (use for inputs that respond to keystroke events)."""
@@ -179,15 +198,29 @@ class BasePage:
 
     # ── AI Self-Healing Hook ───────────────────────────────────────────────────
 
+    @staticmethod
+    def _healing_enabled() -> bool:
+        return bool(Config.ENABLE_AI_HEALING)
+
+    @staticmethod
+    def _intent_of(locator: Locator) -> str:
+        """Derive a human-readable intent from a locator for the healer prompt."""
+        try:
+            return f"interact with the element matching: {locator}"
+        except Exception:
+            return "interact with the intended element"
+
     def safe_click(self, locator: Locator, intent: str, timeout: Optional[int] = None) -> None:
         """Click with AI self-healing fallback.
 
-        If the locator fails, delegates to utils.ai_self_heal to recover a
-        candidate locator based on the DOM snapshot and the human-readable intent.
-        The healed locator is logged for Page Object maintenance.
+        Like click(), but you supply a human-readable `intent` (e.g. "the
+        checkout button") which gives the healer far better context than the raw
+        locator string. Prefer this at call sites where a locator is fragile.
         """
+        t = timeout or self._timeout
         try:
-            self.click(locator, timeout=timeout)
+            locator.wait_for(state="visible", timeout=t)
+            locator.click(timeout=t)
         except PlaywrightTimeoutError:
             logger.warning("Locator timed out. Attempting AI self-heal for intent: '%s'", intent)
             self._attempt_ai_heal(intent, action="click")
@@ -196,8 +229,11 @@ class BasePage:
         self, locator: Locator, value: str, intent: str, timeout: Optional[int] = None
     ) -> None:
         """Fill with AI self-healing fallback (see safe_click for healing behavior)."""
+        t = timeout or self._timeout
         try:
-            self.fill(locator, value, timeout=timeout)
+            locator.wait_for(state="visible", timeout=t)
+            locator.clear()
+            locator.fill(value, timeout=t)
         except PlaywrightTimeoutError:
             logger.warning("Locator timed out. Attempting AI self-heal for intent: '%s'", intent)
             self._attempt_ai_heal(intent, action="fill", value=value)

@@ -327,6 +327,12 @@ class LoadRunner:
                       error="Locust produced no statistics.")
             return
         verdict = reporting.write_reports(run_dir, meta, rows)
+        # Persist a compact row to the central results DB.
+        try:
+            from utils import results_db
+            results_db.record_load(meta, verdict)
+        except Exception:
+            pass
         self._set(
             status="completed",
             ended_at=ended,
@@ -342,6 +348,9 @@ class LoadRunner:
             },
         )
         self._log(f"Done — verdict: {'PASS' if verdict['passed'] else 'FAIL'}")
+        # Enforce retention caps so run artifacts don't grow unbounded.
+        from utils.retention import auto_prune
+        auto_prune(log=self._log)
 
     def _cleanup_mock(self):
         if self._mock and self._mock.poll() is None:
