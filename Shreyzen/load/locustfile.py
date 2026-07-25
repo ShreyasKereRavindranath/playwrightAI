@@ -26,8 +26,12 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+import os  # noqa: E402
+import random  # noqa: E402
+
 from locust import HttpUser, SequentialTaskSet, between, task  # noqa: E402
 
+from load.catalog import API_ENDPOINTS, resolve_endpoints  # noqa: E402
 from load.shapes import ProfileShape  # noqa: E402,F401  (registers the shape)
 
 # ── Shared fixtures ──────────────────────────────────────────────────────────
@@ -311,3 +315,73 @@ class SecurityUser(HttpUser):
                 resp.failure(f"SECURITY: xss payload caused {resp.status_code}")
             else:
                 resp.success()
+
+
+# ── Scenario 4: user-selected endpoints ──────────────────────────────────────
+
+class SelectiveApiUser(HttpUser):
+    """Exercises only the endpoints named in SHREYZEN_ENDPOINTS (comma-separated
+    keys from load.catalog.API_ENDPOINTS). Empty/unset → all endpoints.
+
+    Each hit is chosen at random weighted by the endpoint's catalog weight, so a
+    selection behaves like a scaled-down CRUD mix limited to the chosen calls.
+    Endpoints needing a booking id create one on demand; the report groups by the
+    endpoint's stable label, so it lines up with the profile thresholds.
+    """
+
+    wait_time = between(0.1, 0.6)
+
+    def on_start(self):
+        keys = resolve_endpoints(os.getenv("SHREYZEN_ENDPOINTS", ""))
+        self.endpoints = [API_ENDPOINTS[k] for k in keys]
+        self.token = _auth(self.client)
+        self.owned: list[int] = []
+
+    def _cookie(self) -> dict:
+        return {"Cookie": f"token={self.token}"}
+
+    def _ensure_id(self) -> int | None:
+        """Return an owned booking id, creating one if the pool is empty."""
+        if self.owned:
+            return self.owned[-1]
+        resp = self.client.post("/booking", json=_booking_payload("select"),
+                                name="POST /booking", catch_response=False)
+        try:
+            bid = resp.json().get("bookingid") if resp.status_code == 200 else None
+        except ValueError:
+            bid = None
+        if bid is not None and len(self.owned) < 25:
+            self.owned.append(bid)
+        return bid
+
+    @task
+    def hit(self):
+        ep = random.choices(self.endpoints, weights=[e.weight for e in self.endpoints])[0]
+        path = ep.path
+        headers = self._cookie() if ep.needs_auth else {}
+        json_body = _booking_payload("select") if ep.has_body and ep.key != "auth" else None
+        if ep.key == "auth":
+            json_body = _ADMIN
+
+        if ep.needs_id:
+            bid = self._ensure_id()
+            if bid is None:
+                return  # couldn't obtain a resource to act on; skip this tick
+            path = ep.path.replace("[id]", str(bid))
+
+        with self.client.request(
+            ep.method, path, name=ep.label, headers=headers or None,
+            json=json_body, catch_response=True,
+        ) as resp:
+            # 404 on id-based calls is legitimate (another VU deleted it); drop
+            # the stale id and don't count it as a failure.
+            if ep.needs_id and resp.status_code == 404:
+                resp.success()
+                if self.owned:
+                    self.owned.pop()
+            elif ep.method == "DELETE" and resp.status_code in (200, 201):
+                resp.success()
+                if self.owned:
+                    self.owned.pop()
+            elif resp.status_code >= 400:
+                resp.failure(f"{ep.label} returned {resp.status_code}")

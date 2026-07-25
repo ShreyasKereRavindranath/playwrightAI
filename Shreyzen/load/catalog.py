@@ -44,7 +44,64 @@ SCENARIOS: dict[str, Scenario] = {
         label="Security Probes", icon="🛡️",
         blurb="Non-destructive security checks: auth bypass, missing-auth writes, injection & malformed payloads.",
     ),
+    "api_select": Scenario(
+        key="api_select", user_class="SelectiveApiUser",
+        label="Selected APIs", icon="🎯",
+        blurb="Pick exactly which API endpoints to hit, then run any load profile against just that selection.",
+    ),
 }
+
+
+# ── API endpoint catalog (for the "api_select" scenario) ─────────────────────
+
+@dataclass(frozen=True)
+class Endpoint:
+    key: str            # stable id used on the CLI / API / UI
+    method: str         # HTTP verb
+    path: str           # path template; "[id]" is substituted at runtime
+    label: str          # human-readable label (e.g. "GET /booking/[id]")
+    weight: int = 1     # relative frequency when several are selected
+    needs_auth: bool = False   # send the auth cookie
+    needs_id: bool = False     # requires an existing booking id (create-on-demand)
+    has_body: bool = False     # sends a JSON booking payload
+
+
+# Endpoints mirror the demo booking API (mock server + restful-booker). Point at
+# your own API by editing this catalog; the SelectiveApiUser reads it by key.
+API_ENDPOINTS: dict[str, Endpoint] = {
+    "auth":   Endpoint("auth",   "POST",   "/auth",         "POST /auth",          weight=1, has_body=True),
+    "create": Endpoint("create", "POST",   "/booking",      "POST /booking",       weight=4, has_body=True),
+    "read":   Endpoint("read",   "GET",    "/booking/[id]", "GET /booking/[id]",   weight=6, needs_id=True),
+    "list":   Endpoint("list",   "GET",    "/booking",      "GET /booking",        weight=3),
+    "update": Endpoint("update", "PUT",    "/booking/[id]", "PUT /booking/[id]",   weight=2, needs_auth=True, needs_id=True, has_body=True),
+    "patch":  Endpoint("patch",  "PATCH",  "/booking/[id]", "PATCH /booking/[id]", weight=2, needs_auth=True, needs_id=True, has_body=True),
+    "delete": Endpoint("delete", "DELETE", "/booking/[id]", "DELETE /booking/[id]", weight=1, needs_auth=True, needs_id=True),
+    "ping":   Endpoint("ping",   "GET",    "/ping",         "GET /ping",           weight=1),
+}
+
+
+def resolve_endpoints(keys) -> list[str]:
+    """Validate & de-duplicate a selection of endpoint keys, preserving order.
+
+    Accepts a list or a comma-separated string. An empty/None selection means
+    "all endpoints". Raises ValueError on an unknown key so the CLI/API/UI fail
+    loudly rather than silently dropping a typo.
+    """
+    if not keys:
+        return list(API_ENDPOINTS)
+    if isinstance(keys, str):
+        keys = [k.strip() for k in keys.split(",")]
+    seen: list[str] = []
+    for k in keys:
+        if not k:
+            continue
+        if k not in API_ENDPOINTS:
+            raise ValueError(
+                f"Unknown API endpoint '{k}'. Choices: {', '.join(API_ENDPOINTS)}")
+        if k not in seen:
+            seen.append(k)
+    return seen or list(API_ENDPOINTS)
+
 
 
 # ── Profiles (the 6 load shapes + custom) ────────────────────────────────────
@@ -119,6 +176,7 @@ class RunParams:
     duration: int       # seconds
     spawn_rate: float   # VUs/sec (0 → shape decides)
     host: str
+    endpoints: list = field(default_factory=list)  # api_select: chosen endpoint keys
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -132,6 +190,7 @@ def resolve_params(
     duration: Optional[int] = None,
     spawn_rate: Optional[float] = None,
     host: str = "http://127.0.0.1:8765",
+    endpoints=None,
 ) -> RunParams:
     """Merge user overrides over a profile's defaults, validating keys."""
     if scenario not in SCENARIOS:
@@ -139,6 +198,9 @@ def resolve_params(
     if profile not in PROFILES:
         raise ValueError(f"Unknown profile '{profile}'. Choices: {', '.join(PROFILES)}")
     p = PROFILES[profile]
+    # Endpoint selection only applies to the api_select scenario; validate it
+    # there and default the rest to the empty list (ignored by other scenarios).
+    resolved_endpoints = resolve_endpoints(endpoints) if scenario == "api_select" else []
     return RunParams(
         scenario=scenario,
         profile=profile,
@@ -146,6 +208,7 @@ def resolve_params(
         duration=max(5, int(duration if duration is not None else p.default_duration)),
         spawn_rate=float(spawn_rate if spawn_rate else p.default_spawn_rate),
         host=host,
+        endpoints=resolved_endpoints,
     )
 
 

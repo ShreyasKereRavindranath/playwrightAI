@@ -273,4 +273,41 @@ def write_reports(run_dir: Path, meta: dict, rows: list[dict]) -> dict:
     write_junit(run_dir, meta, verdict)
     write_allure(run_dir, meta, verdict)
     inject_context_panel(run_dir, meta)  # user/system/LLM panel in the HTML report
+    _maybe_write_extent(run_dir, meta, verdict)  # opt-in Extent-style report
     return verdict
+
+
+def _maybe_write_extent(run_dir: Path, meta: dict, verdict: dict) -> None:
+    """Emit an Extent-style HTML report for the load run when EXTENT_REPORT=true.
+
+    Each selected endpoint becomes a 'test' row (pass/fail against the profile
+    thresholds). Best-effort — never raises into the run path.
+    """
+    try:
+        from config.config import Config
+        if not Config.EXTENT_REPORT:
+            return
+        from utils import extent_report
+        tests = [{
+            "nodeid": e["name"],
+            "name": e["name"],
+            "status": "pass" if e["passed"] else "fail",
+            "duration_s": round(float(e.get("avg_ms", 0.0)) / 1000.0, 3),
+            "category": meta.get("scenario", "load"),
+            "message": "; ".join(e.get("reasons", [])),
+        } for e in verdict["endpoints"]]
+        scenario = meta.get("scenario", "load")
+        profile = meta.get("profile", "custom")
+        extent_report.write_report(run_dir / "extent_report.html", tests, {
+            "title": f"Shreyzen Load — {scenario} · {profile}",
+            "generated_at": meta.get("timestamp", ""),
+            "context": {
+                "Scenario": scenario, "Profile": profile,
+                "Peak VUs": meta.get("users", "?"),
+                "Duration": f"{meta.get('duration_s', '?')}s",
+                "Host": meta.get("host", "?"),
+                "Endpoints": ", ".join(meta.get("endpoints") or []) or "all",
+            },
+        })
+    except Exception:
+        pass

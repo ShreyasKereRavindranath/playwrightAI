@@ -180,6 +180,9 @@ def build_command(params: RunParams, run_dir: Path) -> tuple[list[str], dict]:
         "SHREYZEN_SPAWN_RATE": str(params.spawn_rate),
         "PYTHONPATH": str(_ROOT) + os.pathsep + env.get("PYTHONPATH", ""),
     })
+    # api_select scenario: tell the SelectiveApiUser which endpoints to hit.
+    if getattr(params, "endpoints", None):
+        env["SHREYZEN_ENDPOINTS"] = ",".join(params.endpoints)
     return cmd, env
 
 
@@ -316,6 +319,7 @@ class LoadRunner:
             "start_epoch_ms": int(started * 1000),
             "stop_epoch_ms": int(ended * 1000),
             "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "endpoints": list(params.endpoints),
             "context": run_context.capture({
                 "scenario": params.scenario, "profile": params.profile,
                 "target": params.host,
@@ -407,6 +411,7 @@ def run_blocking(params: RunParams, *, quiet: bool = False) -> dict:
         "planned_duration_s": params.duration, "spawn_rate": params.spawn_rate,
         "host": params.host, "start_epoch_ms": int(started * 1000),
         "stop_epoch_ms": int(ended * 1000),
+        "endpoints": list(params.endpoints),
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "context": run_context.capture({
             "scenario": params.scenario, "profile": params.profile, "target": params.host,
