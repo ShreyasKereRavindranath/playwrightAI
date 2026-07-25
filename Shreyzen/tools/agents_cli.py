@@ -78,6 +78,12 @@ def cmd_generate(args) -> None:
         if args.write:
             written = artifact.write(overwrite=args.overwrite)
             print("   " + ("wrote: " + ", ".join(written) if written else "skipped (exists)"))
+            v = artifact.last_validation
+            if v:
+                print("   " + ("✅ collects under pytest"
+                               + (f" (after {v['repairs']} AI repair round(s))" if v['repairs'] else "")
+                               if v.get("ok") else
+                               f"⚠ still fails collection after {v['repairs']} repair round(s) — review"))
         else:
             print("\n".join("   " + ln for ln in artifact.test_code.splitlines()[:20]))
             print("   … (use --write to save)")
@@ -131,6 +137,10 @@ def cmd_pipeline(args) -> None:
         if args.write:
             written = artifact.write(overwrite=args.overwrite)
             status = ("wrote " + ", ".join(written)) if written else "skipped (exists)"
+            v = artifact.last_validation
+            if v:
+                status += (" · ✅ collects" + (f" (+{v['repairs']} repair)" if v['repairs'] else "")
+                           if v.get("ok") else f" · ⚠ fails collection")
         else:
             status = "dry-run"
         print(f"   • {scenario.id} → {artifact.test_path}  [{status}]")

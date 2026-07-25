@@ -137,7 +137,8 @@ def convert_recording(
     clobbers hand-written page objects).
     """
     result = {"page_object": "", "test": "", "page_path": f"pages/{page_name}_page.py",
-              "test_path": f"tests/web/test_{page_name}.py", "written": [], "errors": []}
+              "test_path": f"tests/web/test_{page_name}.py", "written": [], "errors": [],
+              "validation": None}
 
     llm = LLMClient()
     if not llm.available:
@@ -176,7 +177,40 @@ def convert_recording(
                 t_dest.write_text(result["test"], encoding="utf-8")
                 result["written"].append(result["test_path"])
 
+        _maybe_repair(result, llm)
+
     return result
+
+
+def _maybe_repair(result: dict, llm: LLMClient) -> None:
+    """Validate the freshly-written files and let the LLM self-correct (Capability 28).
+
+    Best-effort and gated by Config.NL_REPAIR_ENABLED — never raises. Reflects any
+    repaired code back into `result` and records result["validation"].
+    """
+    if result["test_path"] not in result["written"]:
+        return  # only validate when the test file was actually written
+    try:
+        from config.config import Config
+        if not Config.NL_REPAIR_ENABLED:
+            return
+        from utils import generation_validator as gv
+        files = []
+        if result["page_object"] and result["page_path"] in result["written"]:
+            files.append(gv.GenFile(path=result["page_path"],
+                                    code=result["page_object"], kind="page"))
+        files.append(gv.GenFile(path=result["test_path"], code=result["test"], kind="test"))
+        outcome = gv.repair_generation(
+            files, gv.make_llm_repair_fn(llm), max_attempts=Config.NL_REPAIR_ATTEMPTS)
+        for f in files:
+            if f.kind == "page":
+                result["page_object"] = f.code
+            elif f.kind == "test":
+                result["test"] = f.code
+        result["validation"] = {"ok": outcome.ok, "repairs": outcome.repairs,
+                                "error": outcome.last_error if not outcome.ok else ""}
+    except Exception:  # pragma: no cover - defensive
+        result["validation"] = None
 
 
 def record_and_generate(url: str, page_name: str, *, with_test: bool = True,
@@ -217,6 +251,12 @@ def main(argv=None) -> int:
         print(f"✅ wrote {w}")
     for e in out.get("errors", []):
         print(f"⚠  {e}")
+    v = out.get("validation")
+    if v:
+        print("✅ collects under pytest"
+              + (f" (after {v['repairs']} AI repair round(s))" if v['repairs'] else "")
+              if v.get("ok") else
+              f"⚠  still fails collection after {v['repairs']} repair round(s) — review before running")
     print("\nReview generated files before committing.")
     return 0
 

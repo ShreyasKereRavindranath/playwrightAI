@@ -73,6 +73,13 @@ class Config:
     # replaces — the pytest-html / Allure / JUnit outputs.
     EXTENT_REPORT: bool = os.getenv("EXTENT_REPORT", "false").lower() == "true"
 
+    # ── Capability: NL Generation Validate-and-Repair ─────────────────────────
+    # After the NL generators emit code, run `pytest --collect-only` on it and,
+    # on failure, feed the error back to the LLM to self-correct — up to
+    # NL_REPAIR_ATTEMPTS rounds. Makes generated tests reliably collectable.
+    NL_REPAIR_ENABLED: bool = os.getenv("NL_REPAIR_ENABLED", "true").lower() == "true"
+    NL_REPAIR_ATTEMPTS: int = int(os.getenv("NL_REPAIR_ATTEMPTS", "2"))
+
     # ── Capability: Regression Detection / Alerts ─────────────────────────────
     # Compare the latest run to the median of prior runs and flag regressions.
     REGRESSION_ALERTS: bool = os.getenv("REGRESSION_ALERTS", "true").lower() == "true"
