@@ -98,19 +98,27 @@ INSTALL_BROWSER_DEPS=false    # also run `--with-deps` for OS libraries
 
 ## Capability 1 — AI Self-Healing Locators
 
-Automatically recovers from broken locators by asking GPT-4o-mini to suggest a replacement.
+Automatically recovers from broken locators **at runtime**: when a click or fill
+times out, the framework snapshots the live DOM, asks the configured LLM for a
+replacement locator, retries the action, and logs the healed locator for review.
 
 **Setup:**
-1. Set `OPENAI_API_KEY=sk-...` in `config/.env`
+1. Pick/configure any LLM provider (Capability 17) — OpenAI, Anthropic, Gemini,
+   Ollama, or LM Studio. Healing is **provider-neutral**, not OpenAI-only.
 2. Set `ENABLE_AI_HEALING=true` in `config/.env`
 
-**Usage in tests:** Replace `page.locator(...)` calls through `BasePage` helpers.
-When a locator fails, `AISelfHeal.heal(intent, page_html)` is called to propose a fix.
+**How it fires:** Healing is built into `BasePage.click()` and `BasePage.fill()`,
+so **every existing test** self-heals with no code changes. For fragile call
+sites you can use `safe_click(locator, intent="the checkout button")` /
+`safe_fill(...)` to give the healer richer intent context.
 
-**Review pending heals:**
+**Review healed locators** (fold the good ones back into your Page Objects):
 ```bash
-cat data/healing_log.json
+python -m tools.healings                       # list pending healings
+python -m tools.healings --all --json          # everything, machine-readable
+python -m tools.healings --reviewed "<intent>" # mark one reviewed
 ```
+The raw log remains at `data/healing_log.json`.
 
 ---
 
@@ -236,6 +244,10 @@ python tools/codegen_converter.py recorded.py --page checkout --with-test
 
 Output: `pages/login_page.py` + (optionally) `tests/web/test_login.py`.
 
+> **Prefer Capability 22** (record-and-generate) for a one-click flow — Studio
+> launches the recorder and converts the result automatically, no manual
+> `codegen`/convert steps.
+
 ---
 
 ## Capability 7 — Accessibility Audit
@@ -300,6 +312,9 @@ python tools/prioritize_tests.py --list --dry-run
 
 **Extend the map:** Edit `_PAGE_TO_TEST_MAP` in `tools/prioritize_tests.py` to add new page→test mappings as you grow the suite.
 
+> **Prefer Capability 21** (import-graph impact analysis) for zero-maintenance
+> selection — it needs no manual map and traces the real dependency graph.
+
 ---
 
 ## Capability 10 — Slack / Teams Notifications
@@ -334,7 +349,14 @@ Collects LCP, CLS, TTFB, DOM Content Loaded, and full load time per test via a P
 PERFORMANCE_METRICS=true
 PERFORMANCE_LCP_BUDGET_MS=2500   # warn if LCP exceeds this
 PERFORMANCE_LOAD_BUDGET_MS=5000  # warn if page load exceeds this
+PERFORMANCE_GATE=false           # true → exceeding a budget FAILS the test (hard gate)
 ```
+
+By default a blown budget only logs a warning. Set `PERFORMANCE_GATE=true` to
+turn budgets into a **hard gate**: any otherwise-passing test whose LCP or load
+time exceeds its budget is failed, with the breach recorded in the report (and,
+with `TRACE_ON_FAILURE=true`, a trace captured). This makes perf regressions
+break the build like any functional failure.
 
 Metrics are stored in `logs_and_reports/performance.db` (SQLite).
 
@@ -523,6 +545,195 @@ on Anthropic, temperature on current Claude models) are disabled gracefully
 rather than failing.
 
 📖 **Full guide:** [LLM_PROVIDERS.md](LLM_PROVIDERS.md)
+
+---
+
+## Capability 18 — Report Retention / Auto-Pruning
+
+Run artifacts (`functional_runs/`, `load_runs/`, `screenshots/`, `videos/`,
+`a11y/`, `visual_diffs/`, `runs/*.json`) grow forever otherwise — videos and
+self-contained HTML dominate disk. Three independent caps are enforced *per
+category*, and pruning runs automatically after every functional/load run.
+
+**Setup (defaults shown):**
+```ini
+RETENTION_ENABLED=true
+RETENTION_MAX_RUNS=50        # keep the 50 newest runs per category (0 = unlimited)
+RETENTION_MAX_AGE_DAYS=30    # drop runs older than 30 days (0 = no age limit)
+RETENTION_MAX_SIZE_MB=2048   # keep the whole tree under 2 GB, oldest dropped first (0 = off)
+```
+
+**On demand (safe to preview first):**
+```bash
+python -m tools.prune_reports --dry-run          # show what would go, delete nothing
+python -m tools.prune_reports                     # enforce Config/.env limits now
+python -m tools.prune_reports --max-runs 20 --max-age-days 14 --max-size-mb 1024
+```
+
+Newest runs are always kept (ordering is by modification time). Every prune
+logs exactly what it dropped and why — no silent truncation. In Shreyzen Studio,
+`GET /api/retention/preview` shows the dry-run and `POST /api/retention/prune`
+enforces it.
+
+---
+
+## Capability 19 — Inline Trace & Video Viewer
+Every failed browser test captures a full **Playwright trace** (DOM snapshots,
+screenshots, network, console, sources) into its own run folder, and videos
+(when recording) land beside it. Shreyzen Studio surfaces both inline under the
+functional run's Results panel — one click from a failure to *watching what
+happened*.
+
+**Setup (defaults shown):**
+```ini
+TRACE_ON_FAILURE=true   # write trace.zip for tests that fail (off = never trace)
+RECORD_VIDEO=true       # record video (only applies when HEADLESS=false)
+```
+
+Traces are written **only on failure** to keep disk use low, and are swept up by
+the retention caps above. In Studio, a trace link opens the Playwright Trace
+Viewer (`playwright show-trace`) on the host; you can also download the
+`trace.zip` and drop it on [trace.playwright.dev](https://trace.playwright.dev).
+Videos play inline in the browser.
+
+Endpoints: `GET /api/functional/artifacts/{run_id}` (list),
+`GET /fartifact/{run_id}/{name}` (download/stream),
+`GET /ftrace/{run_id}/{name}` (open in Trace Viewer).
+
+---
+
+## Capability 20 — Regression Detection & Alerts
+
+The dashboard charts trends; this turns them into decisions. After each run,
+the latest result is compared to the **median of prior runs** and meaningful
+regressions are flagged — in the log, on the dashboard, and (optionally) in
+Slack.
+
+**Setup (defaults shown):**
+```ini
+REGRESSION_ALERTS=true
+REGRESSION_MIN_HISTORY=3        # need at least 3 prior runs before alerting
+REGRESSION_PASS_RATE_DROP=5.0   # alert if pass rate drops ≥ 5 percentage points
+REGRESSION_DURATION_PCT=25.0    # alert if suite is ≥ 25% slower
+REGRESSION_PERF_PCT=25.0        # alert if avg LCP / load_time is ≥ 25% worse
+```
+
+Baseline uses the **median** (robust to a single outlier run), and nothing is
+reported until there's enough history — no crying wolf. A breach ≥ 2× the
+threshold is marked `critical`, otherwise `warning`.
+
+**On demand / CI gate:**
+```bash
+python -m tools.check_regressions           # human-readable report
+python -m tools.check_regressions --gate    # exit 1 on any regression (fails CI)
+python -m tools.check_regressions --json     # machine-readable
+```
+
+Dashboard endpoint: `GET /api/regressions`. When `SLACK_NOTIFICATIONS=true`,
+regressions are also pushed to Slack alongside the run summary.
+
+---
+
+## Capability 21 — Import-Graph Test Impact Analysis
+
+Runs **only the tests a change can actually break** — determined from the real
+Python import graph, not a hand-maintained keyword map (Capability 9). A test is
+impacted if it, or anything in its transitive import closure, was changed.
+
+**No setup** beyond being a git repo. Non-Python changes under `tests/`/`data/`
+and "core" changes (`conftest.py`, `config/config.py`, `pages/base_page.py`,
+`requirements.txt`, `pytest.ini`) conservatively trigger the full suite — it
+errs toward running too much rather than skipping something risky.
+
+**CLI:**
+```bash
+python -m tools.impact_run                 # analyse vs working tree, print plan
+python -m tools.impact_run --base main     # diff vs main
+python -m tools.impact_run --list          # impacted test files (or ALL)
+python -m tools.impact_run --run           # run pytest on just those tests
+python -m tools.impact_run --run --base origin/main -- -m smoke   # extra pytest args after --
+```
+
+**In Studio:** the Functional tab's **🎯 Changed only** button selects exactly
+the impacted tests (or the whole suite on a core change). Endpoint:
+`GET /api/impact?base=HEAD`.
+
+**Wire into CI:**
+```yaml
+- name: Run impacted tests
+  run: python -m tools.impact_run --run --base origin/${{ github.base_ref }}
+```
+
+---
+
+## Capability 22 — Record-and-Generate Authoring
+
+Author a test by *doing* it. Studio launches Playwright's recorder in a real
+browser; you click through the flow, close the browser, and the recording is
+converted into a framework-shaped **Page Object** (+ optional smoke test) in the
+project's conventions — no hand-written selectors.
+
+**Setup:** Any configured LLM provider (Capability 17). Recording needs a
+display, so it runs on the machine hosting Studio (not a headless CI box).
+
+**In Studio:** Functional tab → **0 · Record a new test** → enter a start URL and
+a page name → **● Record flow**. Files are written to `pages/<name>_page.py` and
+`tests/web/test_<name>.py` (existing files are never overwritten).
+
+**CLI:**
+```bash
+python -m tools.record_generate https://www.saucedemo.com/ --page login
+python -m tools.record_generate https://example.com --page checkout --no-test
+python -m tools.record_generate https://example.com --page cart --print-only
+```
+
+Endpoints: `POST /api/record/start`, `GET /api/record/state`.
+
+---
+
+## Capability 23 — Central Results Database
+
+Every functional and load run is persisted as a compact row in a
+`run_summaries` table inside `logs_and_reports/flakiness.db` (the same SQLite
+file that holds flakiness + perf). This gives you **durable, queryable run
+history that survives artifact pruning** — even after the HTML/videos for a run
+are swept by retention (Capability 18), its summary row remains.
+
+**Why SQLite (capacity):** a summary row is ~1 KB, so a million runs ≈ 1 GB and
+SQLite handles that comfortably (its hard ceiling is 281 TB). The raw
+videos/HTML are what actually grow — that's what retention bounds. For a shared
+team store you can later point the same API at Postgres; the write path is
+isolated in `utils/results_db.py`.
+
+**Automatic:** runs record themselves on finalize — no flag needed.
+
+**Query it:**
+```bash
+python -m tools.results_db --stats                 # totals + pass rate
+python -m tools.results_db --list                  # recent runs
+python -m tools.results_db --list --kind load      # filter by kind
+python -m tools.results_db --get <run_id>          # full stored summary
+python -m tools.results_db --backfill              # import older runs from JSON
+```
+
+Endpoints: `GET /api/db/runs`, `GET /api/db/run/{run_id}`,
+`POST /api/db/backfill`.
+
+---
+
+## Capability 24 — Natural-Language Test Authoring in Studio
+
+Describe a scenario in plain English and get a framework-shaped Page Object +
+pytest test. This is the CLI generator (Capability 5) surfaced in the UI.
+
+**In Studio:** Functional tab → **0b · Describe a test** → type a scenario
+(e.g. "User cannot checkout with an empty cart") → **✨ Generate**. Files are
+written under `pages/` and `tests/web/` (existing files are never overwritten)
+and the code is shown for review. Endpoint: `POST /api/generate`.
+
+> **Multi-user note:** run history is now centralized (Capability 23), which is
+> the foundation for a shared team deployment. Per-user auth/roles on the Studio
+> server is a deployment concern left to your reverse proxy / SSO for now.
 
 ---
 

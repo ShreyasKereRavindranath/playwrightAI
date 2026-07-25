@@ -43,7 +43,13 @@ logger = logging.getLogger(__name__)
 # ── Run-level constants (set once when conftest loads) ─────────────────────
 RUN_TS         = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 SCREENSHOT_DIR = Path("logs_and_reports/screenshots") / f"run_{RUN_TS}"
-VIDEO_DIR      = Path("logs_and_reports/videos")      / f"run_{RUN_TS}"
+# When Studio's engine drives the run it points SHREYZEN_ARTIFACT_DIR at the
+# run's own folder so videos + traces land beside the report; otherwise they
+# collect under logs_and_reports/artifacts/run_<ts>/ for standalone pytest runs.
+_ARTIFACT_ENV  = os.environ.get("SHREYZEN_ARTIFACT_DIR")
+ARTIFACT_DIR   = (Path(_ARTIFACT_ENV) if _ARTIFACT_ENV
+                  else Path("logs_and_reports/artifacts") / f"run_{RUN_TS}")
+VIDEO_DIR      = ARTIFACT_DIR if _ARTIFACT_ENV else Path("logs_and_reports/videos") / f"run_{RUN_TS}"
 
 # ── Lazy-loaded capability singletons (only imported when flag is on) ──────
 _flakiness_tracker = None
@@ -157,6 +163,48 @@ def browser_context_args(browser_context_args):
     }
 
 
+# ── Playwright trace capture (TRACE_ON_FAILURE) ─────────────────────────────
+# Records a full Playwright trace (DOM snapshots, screenshots, network, console)
+# per test. The trace.zip opens in the Playwright Trace Viewer — Studio serves
+# it inline so a failed test is one click from "watch what happened".
+
+@pytest.fixture(autouse=True)
+def _trace_capture(request):
+    if not Config.TRACE_ON_FAILURE:
+        yield
+        return
+    # Only trace browser tests — skip pure API/unit tests that never open a
+    # context (requesting `context` there would force a needless browser launch).
+    if "context" not in request.fixturenames and "page" not in request.fixturenames:
+        yield
+        return
+    try:
+        context = request.getfixturevalue("context")
+        context.tracing.start(screenshots=True, snapshots=True, sources=True)
+    except Exception as exc:  # tracing unsupported / no browser context
+        logger.debug("Trace start skipped: %s", exc)
+        yield
+        return
+    try:
+        yield
+    finally:
+        # Keep the trace only when the test failed (TRACE_ON_FAILURE); on pass we
+        # stop without writing to avoid disk bloat. request.node.rep_call is set
+        # by the makereport hook below.
+        failed = getattr(getattr(request.node, "rep_call", None), "failed", False) \
+            or getattr(getattr(request.node, "rep_setup", None), "failed", False)
+        try:
+            if failed:
+                ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+                dest = ARTIFACT_DIR / f"{_safe_name(request.node.nodeid)}__trace.zip"
+                context.tracing.stop(path=str(dest))
+                logger.info("Trace → %s", dest)
+            else:
+                context.tracing.stop()
+        except Exception as exc:
+            logger.debug("Trace stop skipped: %s", exc)
+
+
 # ── Per-test capability fixture ────────────────────────────────────────────
 # Visual regression and accessibility are opt-in per test via the
 # `check_visual` and `check_a11y` fixtures, OR auto-run for every UI test
@@ -251,7 +299,20 @@ def pytest_runtest_makereport(item, call):
             perf = _get_perf()
             if perf:
                 try:
-                    perf.collect(page, test_id=item.nodeid, run_ts=RUN_TS)
+                    metrics = perf.collect(page, test_id=item.nodeid, run_ts=RUN_TS)
+                    # Hard gate: fail an otherwise-passing test that blew its
+                    # perf budget (opt-in via PERFORMANCE_GATE).
+                    exceeded = metrics.get("budgets_exceeded") if metrics else None
+                    if exceeded and Config.PERFORMANCE_GATE and not report.failed:
+                        detail = ", ".join(
+                            f"{k}={v['value']}ms > budget {v['budget']}ms"
+                            for k, v in exceeded.items()
+                        )
+                        report.outcome = "failed"
+                        msg = f"Performance budget exceeded: {detail}"
+                        report.longrepr = msg
+                        report.sections.append(("Performance budget", msg))
+                        logger.warning("Perf GATE failed %s: %s", safe, detail)
                 except Exception as exc:
                     logger.debug("Perf collection skipped: %s", exc)
 
@@ -427,6 +488,34 @@ def pytest_sessionfinish(session, exitstatus):
         (runs_dir / f"run_{RUN_TS}.json").write_text(json.dumps(run_data, indent=2))
     except Exception as exc:
         logger.debug("Run JSON export failed: %s", exc)
+
+    # 12. Regression detection vs prior runs (must run AFTER the run JSON above,
+    #     so the just-finished run is included in the history).
+    if Config.REGRESSION_ALERTS:
+        try:
+            from utils.regression_detector import detect_with_config
+            reg = detect_with_config()
+            if reg.has_regressions:
+                logger.warning(
+                    "REGRESSIONS vs baseline (%d):\n%s",
+                    len(reg.regressions),
+                    "\n".join(f"  [{r.severity.upper()}] {r.message}"
+                              for r in reg.regressions),
+                )
+                # Push a Slack alert too, if notifications are on.
+                if Config.SLACK_NOTIFICATIONS and Config.SLACK_WEBHOOK_URL:
+                    try:
+                        from utils.slack_notifier import SlackNotifier
+                        lines = "\n".join(f"• [{r.severity.upper()}] {r.message}"
+                                          for r in reg.regressions)
+                        SlackNotifier(Config.SLACK_WEBHOOK_URL, Config.SLACK_CHANNEL).send_text(
+                            f"📉 *Regressions detected* in run `{reg.latest_run}` "
+                            f"(vs {reg.baseline_runs} prior runs):\n{lines}"
+                        )
+                    except Exception as exc:
+                        logger.debug("Regression Slack alert skipped: %s", exc)
+        except Exception as exc:
+            logger.debug("Regression detection skipped: %s", exc)
 
 
 # ── Page Object fixtures ───────────────────────────────────────────────────

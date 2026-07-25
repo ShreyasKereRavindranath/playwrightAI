@@ -48,14 +48,15 @@ class AISelfHeal:
 
     def heal(self, intent: str, page_html: str) -> Optional[str]:
         """Return a candidate locator string, or None if healing fails."""
-        from config.config import Config
         from utils.llm_client import LLMClient
 
-        if not Config.OPENAI_API_KEY:
-            logger.error("AI healing enabled but OPENAI_API_KEY is not set.")
+        llm = LLMClient()
+        # Provider-neutral gate: works with any configured provider (OpenAI,
+        # Anthropic, Gemini, Ollama, LM Studio), not just OPENAI_API_KEY.
+        if not llm.available:
+            logger.error("AI healing enabled but no LLM provider is configured/usable.")
             return None
 
-        llm = LLMClient()
         candidate = llm.complete(
             prompt=_PROMPT.format(intent=intent, html=page_html[:10_000]),
             system=_SYSTEM,
@@ -63,6 +64,7 @@ class AISelfHeal:
             temperature=0,
         )
 
+        candidate = self._clean(candidate)
         if not candidate:
             logger.warning("AI self-heal: LLM returned empty response for intent '%s'", intent)
             return None
@@ -77,6 +79,22 @@ class AISelfHeal:
         logger.warning("AI self-heal CANDIDATE: '%s' — UPDATE YOUR PAGE OBJECT", candidate)
         self._log_healing(intent, candidate)
         return candidate
+
+    @staticmethod
+    def _clean(candidate: Optional[str]) -> str:
+        """Strip code fences / quotes / stray prose an LLM may wrap around the locator."""
+        if not candidate:
+            return ""
+        text = candidate.strip()
+        if text.startswith("```"):
+            # drop the opening fence (optionally ```lang) and the closing fence
+            lines = [ln for ln in text.splitlines() if not ln.strip().startswith("```")]
+            text = "\n".join(lines).strip()
+        text = text.splitlines()[0].strip() if text else ""
+        # remove wrapping quotes if the model quoted the whole thing
+        if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"', "`"):
+            text = text[1:-1].strip()
+        return text
 
     # ── Healing log ───────────────────────────────────────────────────────────
 

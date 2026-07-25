@@ -90,6 +90,13 @@ class SlackNotifier:
 
         return self._post(payload, "Slack")
 
+    def send_text(self, text: str) -> bool:
+        """Post a plain markdown message (used for regression alerts)."""
+        payload = {"channel": self._channel,
+                   "blocks": [{"type": "section",
+                               "text": {"type": "mrkdwn", "text": text}}]}
+        return self._post(payload, "Slack")
+
     def _post(self, payload: dict, platform: str) -> bool:
         try:
             resp = requests.post(
