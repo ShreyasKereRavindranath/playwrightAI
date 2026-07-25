@@ -131,6 +131,49 @@ def _safe_name(nodeid: str, max_len: int = 120) -> str:
 
 # ── Session start ──────────────────────────────────────────────────────────
 
+def pytest_addoption(parser):
+    """--quarantine-only runs ONLY the quarantined (known-flaky) tests."""
+    parser.addoption(
+        "--quarantine-only", action="store_true", default=False,
+        help="Run only the quarantined (known-flaky) tests — the separate lane.")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Enforce the quarantine list (Capability 2).
+
+    Normal run  → deselect quarantined tests so a known flake can't gate the build.
+    --quarantine-only → keep ONLY the quarantined tests (the flaky lane).
+    Controlled by QUARANTINE_ENABLED; a no-op when the list is empty.
+    """
+    only = config.getoption("--quarantine-only")
+    if not Config.QUARANTINE_ENABLED and not only:
+        return
+    try:
+        from utils import quarantine
+        q_ids = quarantine.ids()
+    except Exception:
+        q_ids = set()
+    if not q_ids and not only:
+        return
+
+    keep, drop = [], []
+    for item in items:
+        is_q = item.nodeid in q_ids
+        if only:
+            (keep if is_q else drop).append(item)
+        else:
+            (drop if is_q else keep).append(item)
+        if is_q:
+            item.add_marker(pytest.mark.quarantine)
+
+    if drop:
+        reason = ("not quarantined (--quarantine-only)" if only
+                  else "quarantined: known-flaky (see data/quarantine.json)")
+        config.hook.pytest_deselected(items=drop)
+        items[:] = keep
+        logger.info("Quarantine: %d test(s) deselected — %s", len(drop), reason)
+
+
 def pytest_configure(config):
     """
     Ensure the required Playwright browser is installed before any test runs.
@@ -438,6 +481,27 @@ def pytest_sessionfinish(session, exitstatus):
             flaky_tests = tracker.get_flaky_tests()
         except Exception:
             pass
+
+    # 7b. Auto-quarantine newly-detected flaky tests (opt-in via AUTO_QUARANTINE).
+    #     Each new entry gets an AI (or offline heuristic) diagnosis so the reason
+    #     and a suggested fix travel with the quarantine record.
+    if Config.AUTO_QUARANTINE and flaky_tests and tracker:
+        try:
+            from utils import quarantine, flaky_analysis
+            already = quarantine.ids()
+            for ft in flaky_tests:
+                tid = ft.get("test_id", "")
+                if not tid or tid in already:
+                    continue
+                dx = flaky_analysis.diagnose(tid, tracker.get_history(tid))
+                quarantine.add(
+                    tid, reason=dx["explanation"], category=dx["category"],
+                    confidence=dx["confidence"], suggested_fix=dx["suggested_fix"],
+                    flake_rate=ft.get("flake_rate"), source=f"auto:{dx['via']}")
+                logger.warning("Auto-quarantined flaky test %s [%s] — %s",
+                               tid, dx["category"], dx["suggested_fix"])
+        except Exception as exc:
+            logger.debug("Auto-quarantine skipped: %s", exc)
 
     ai_summary_text = None
 

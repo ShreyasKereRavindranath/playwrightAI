@@ -159,6 +159,25 @@ class FlakinessTracker:
             logger.warning("FlakinessTracker.get_run_summary failed: %s", exc)
             return {}
 
+    def get_history(self, test_id: str, limit: int = 30) -> list:
+        """Return the most recent outcomes for a test (newest first).
+
+        Each row: {outcome, duration, run_ts, browser, recorded}. Feeds the flaky
+        diagnosis (utils/flaky_analysis.py).
+        """
+        sql = """
+            SELECT outcome, duration, run_ts, browser, recorded
+            FROM test_results WHERE test_id = ?
+            ORDER BY id DESC LIMIT ?
+        """
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(sql, (test_id, limit)).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            logger.warning("FlakinessTracker.get_history failed: %s", exc)
+            return []
+
     def get_recent_runs(self, limit: int = 10) -> list:
         """Return the most recent unique run timestamps with their summary stats."""
         sql = """
