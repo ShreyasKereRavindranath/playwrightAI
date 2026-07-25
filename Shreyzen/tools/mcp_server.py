@@ -211,6 +211,20 @@ def tool_results(kind: str = "", limit: int = 20) -> dict:
             "runs": results_db.list_runs(kind=kind or None, limit=limit)}
 
 
+def tool_cluster_failures(top: int = 10, use_ai: bool = False, limit: int = 200) -> dict:
+    """Cluster recent test failures by root cause and triage each (Capability 30)."""
+    from utils import failure_cluster
+    from utils.failure_store import FailureStore
+    failures = FailureStore().recent(limit=limit)
+    llm = None
+    if not use_ai:
+        class _NoLLM:
+            available = False
+        llm = _NoLLM()
+    return {"failures": len(failures),
+            "clusters": failure_cluster.cluster_and_triage(failures, llm=llm, top=top)}
+
+
 def tool_doctor() -> dict:
     """Environment health check (same checks as `python -m tools.doctor`)."""
     from tools import doctor
@@ -229,6 +243,7 @@ TOOLS = {
     "impact_analysis": tool_impact_analysis,
     "run_load": tool_run_load,
     "results": tool_results,
+    "cluster_failures": tool_cluster_failures,
     "doctor": tool_doctor,
 }
 
