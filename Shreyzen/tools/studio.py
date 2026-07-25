@@ -584,8 +584,16 @@ def main():
     p_run.add_argument("--host", default=_DEFAULT_HOST)
     p_run.set_defaults(func=_cmd_run)
 
+    # `init` and `doctor` are thin passthroughs to their own modules so they're
+    # reachable via ./run.sh (init|doctor) as well as python -m tools.init/doctor.
+    from tools import init as _init_mod, doctor as _doctor_mod
+    _init_mod.build_parser(sub.add_parser("init", help="scaffold Shreyzen onto a new project"))
+    _doctor_mod.build_parser(sub.add_parser("doctor", help="validate the environment"))
+
     args = parser.parse_args()
-    args.func(args)
+    rc = args.func(args)
+    if isinstance(rc, int):
+        raise SystemExit(rc)
 
 
 # ── Dashboard HTML ───────────────────────────────────────────────────────────
