@@ -23,6 +23,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# Allow bare-script invocation (`python tools/doctor.py`) to resolve first-party
+# packages (config, llm, …), not just `python -m tools.doctor`. When run as a
+# script, sys.path[0] is tools/, so the project root must be added explicitly.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 OK, WARN, FAIL = "ok", "warn", "fail"
 _ICON = {OK: "✓", WARN: "!", FAIL: "✗"}
 
