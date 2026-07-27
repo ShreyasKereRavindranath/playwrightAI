@@ -97,6 +97,21 @@ class Healer(BaseAgent):
 
         return self._heal_offline(diagnosis, source_code)
 
+    def heal_failure(self, error_text: str, test_id: str = "unknown") -> HealResult:
+        """Diagnose + fix one failure given only its error text / traceback.
+
+        Locates the framework source file from the traceback itself (so callers
+        that only have a raw error blob — e.g. the Studio runner — get the same
+        rich, source-aware analysis as heal_from_log without wiring up paths).
+        """
+        src_file, src_code = self._locate_source(error_text)
+        return self.heal(
+            error_text=error_text,
+            source_file=src_file or None,
+            source_code=src_code or None,
+            test_id=test_id,
+        )
+
     def heal_from_log(self, log_path: str, max_failures: int = 3) -> List[HealResult]:
         """Parse a pytest log and heal each failure (capped for sanity)."""
         text = Path(log_path).read_text(encoding="utf-8", errors="ignore")

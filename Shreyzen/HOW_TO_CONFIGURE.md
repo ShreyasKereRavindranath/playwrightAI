@@ -544,6 +544,17 @@ python tools/studio.py serve      # → http://127.0.0.1:8770   (or ./run.sh)
   **titled by its test type** and embeds who ran it, browser, OS, a timezone-aware
   timestamp, and the active LLM (or a deterministic offline fallback when none is
   configured/active).
+- **AI Failure Analysis** — every failed/error test gets a 🤖 root-cause panel
+  right in the per-test results: the diagnosed **reason**, a **confidence** bar,
+  the failure **category**, the **failing locator** and source file, likely
+  **causes**, and a **suggested fix** (locator swap or unified diff). It's powered
+  by the [Healer agent](agents/AGENTS_GUIDELINES.md) and **works offline** (a
+  deterministic rule engine) — richer diffs appear when an LLM provider is
+  configured. The **top (highest-confidence) failure is also injected as a banner
+  at the top of the run's HTML report**, and every analysed failure is persisted
+  to `logs_and_reports/functional_runs/<run_id>/analysis.json`. Analysis never
+  blocks or breaks a run — if it can't classify a failure it simply doesn't
+  annotate it.
 
 **Load mode** — Locust load/soak/spike/stress + non-destructive security probes:
 - **6 load profiles:** smoke, load, stress, spike, soak, breakpoint (+ Custom).
@@ -825,6 +836,13 @@ pytest tests/ -v
 ```
 
 Open `logs_and_reports/report.html` — the AI summary appears at the top.
+
+> **Note — two distinct banners.** This **executive summary** (whole-run
+> narrative, gated on `AI_SUMMARY=true`, injected into
+> `logs_and_reports/report.html`) is separate from the **AI Failure Analysis**
+> banner that the Studio functional runner injects into each run's own
+> `functional_runs/<run_id>/report.html` (top failure's root cause + fix; works
+> offline, no flag required — see Capability 15). They don't collide.
 
 ---
 

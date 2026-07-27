@@ -24,7 +24,7 @@ runnable locally with no commands to memorise.
 - **UI tests** (Playwright) split by layer: `api` · `web` · `mobile`
 - **Load testing** (Locust): 6 profiles, custom virtual-user control, live dashboard, plus **per-endpoint selection** (pick exactly which APIs to hit)
 - **Reports everywhere**: HTML · JUnit · JSON · Allure · **Extent-style dashboard**
-- **AI capabilities**: self-healing locators (that **auto-PR the Page Object fix**), **self-validating** NL→test generation (auto-repaired until it collects), **flaky-test diagnosis + auto-quarantine**, **failure root-cause clustering** (product/test/flaky/env triage), auto-repair, test-quality audit, run summaries — **pluggable across OpenAI · Anthropic · Gemini · Ollama · LM Studio · custom endpoints**
+- **AI capabilities**: self-healing locators (that **auto-PR the Page Object fix**), **self-validating** NL→test generation (auto-repaired until it collects), **flaky-test diagnosis + auto-quarantine**, **failure root-cause clustering** (product/test/flaky/env triage), auto-repair, **AI failure analysis** (root-cause + suggested fix on every failed test), test-quality audit, run summaries — **pluggable across OpenAI · Anthropic · Gemini · Ollama · LM Studio · custom endpoints**
 - **Agent-native**: an **MCP server** exposes run/generate/heal/diagnose/impact/load as tools, so Claude Code or Cursor can drive the framework conversationally
 - **Drop onto any project**: `shreyzen init` scaffolds config + a starter Page Object/test; `shreyzen doctor` validates your environment
 - **CI ready**: GitHub Actions (PR checks, on-demand load, nightly soaks) **and a Jenkins pipeline**
@@ -109,7 +109,10 @@ left hanging). Tabs:
   per run (BASE_URL; mock / public / custom API; mobile **device** + **markers**
   as dropdowns; browser; headless); watch live pass/fail; open or **download**
   HTML/JUnit/JSON/Allure. Recent runs are labelled by test type (`WEB_` · `API_`
-  · `MOBILE_`).
+  · `MOBILE_`). Every failed test shows an **🤖 AI Failure Analysis** panel —
+  root cause, confidence, failing locator, likely causes, and a suggested fix
+  (works offline; richer with an LLM) — and the top failure is injected as a
+  banner atop the run's HTML report.
 - **Load** — Locust scenarios at any scale, headless-CI friendly:
 
 ```bash
@@ -197,6 +200,7 @@ A lightweight snapshot of where Shreyzen is headed — see the
 [issues](https://github.com/ShreyasKereRavindranath/playwrightAI/issues) for
 details and to weigh in.
 
+- **Recently shipped** — AI Failure Analysis in Studio: root-cause + confidence + suggested fix on every failed test, with the top failure injected into the run's HTML report (works offline).
 - **In progress** — sharper AI auto-repair, richer run-comparison metrics.
 - **Planned** — visual-regression baselines in Studio, more Locust scenarios, downloadable Allure trend history.
 - **Ideas / help wanted** — additional LLM providers, accessibility (a11y) test layer, container/devcontainer setup.

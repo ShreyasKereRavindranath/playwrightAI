@@ -153,6 +153,174 @@ def _new_run_id() -> str:
     return datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "__functional"
 
 
+# ── AI failure analysis (Concept 4) ──────────────────────────────────────────
+# Human-readable "possible causes" per failure category, shown beneath the
+# Healer's root-cause diagnosis in the UI. Kept here (presentation) rather than
+# in the Healer so the agent stays focused on producing one concrete fix.
+_POSSIBLE_CAUSES = {
+    "locator_timeout": [
+        "Element not rendered yet (slow backend / async load)",
+        "An overlay or modal is intercepting the element",
+        "Locator no longer matches the DOM (stale or wrong selector)",
+    ],
+    "strict_mode_violation": [
+        "Locator matched more than one element",
+        "The page renders duplicate components",
+        "Selector is too broad — needs a data-test / role scope",
+    ],
+    "assertion_mismatch": [
+        "Application behaviour changed",
+        "Test data is stale",
+        "Race condition — asserted before the UI settled",
+    ],
+    "url_mismatch": [
+        "Navigation did not complete before the assertion",
+        "A route or redirect changed",
+        "The expected URL pattern is out of date",
+    ],
+    "hardcoded_wait": [
+        "A fixed sleep is too short under load",
+        "Timing-dependent flakiness",
+        "Missing an explicit Playwright wait condition",
+    ],
+    "import_or_collection_error": [
+        "Import error or missing dependency",
+        "Syntax error in the test module",
+        "A fixture failed to load",
+    ],
+    "unknown": [
+        "Could not be classified automatically — inspect the traceback",
+    ],
+}
+
+_MAX_ANALYZED_FAILURES = 6  # cap LLM/rule work so finalize stays snappy
+
+
+def _norm_test_name(name: str) -> str:
+    """Strip parametrization + class qualifier to the bare test-function token."""
+    base = (name or "").split("[", 1)[0].strip()
+    return base.rsplit(".", 1)[-1].rsplit("::", 1)[-1]
+
+
+def _heal_result_to_analysis(result) -> dict:
+    """Flatten a HealResult into the JSON the UI's AI Analysis panel consumes."""
+    dx = result.diagnosis
+    return {
+        "category": dx.category,
+        "root_cause": dx.root_cause or result.explanation,
+        "confidence": round(dx.confidence, 2),
+        "failing_symbol": dx.failing_symbol,
+        "file": dx.file,
+        "explanation": result.explanation,
+        "suggested_fix": result.suggested_fix,
+        "fix_kind": result.fix_kind,
+        "generated_by": result.generated_by,
+        "possible_causes": _POSSIBLE_CAUSES.get(dx.category, _POSSIBLE_CAUSES["unknown"]),
+    }
+
+
+def analyze_failures(cases: list[dict], log_path: Path) -> int:
+    """Attach an AI root-cause `analysis` dict to each failed/error case in place.
+
+    Uses the Healer agent, which works offline (deterministic rule engine) and
+    gets richer when an LLM provider is configured. Best-effort: any failure to
+    analyse leaves the case untouched rather than breaking the run. Returns the
+    number of cases annotated.
+    """
+    failures = [c for c in cases if c.get("status") in ("failed", "error")]
+    if not failures:
+        return 0
+    try:
+        from agents.healer import Healer
+    except Exception:
+        return 0
+
+    healer = Healer()
+    log_text = log_path.read_text(encoding="utf-8", errors="ignore") if log_path.exists() else ""
+
+    # Map the per-failure tracebacks parsed from the log to their cases by name,
+    # so each analysis is source-aware (real traceback → locates the .py file).
+    blocks_by_name: dict[str, str] = {}
+    if log_text:
+        try:
+            for blk in Healer._split_failures(log_text):
+                blocks_by_name[_norm_test_name(blk["test"])] = blk["body"]
+        except Exception:
+            blocks_by_name = {}
+
+    annotated = 0
+    for case in failures[:_MAX_ANALYZED_FAILURES]:
+        # Prefer the full traceback block; fall back to the JUnit message.
+        error_text = blocks_by_name.get(_norm_test_name(case["name"])) or case.get("message", "")
+        if not error_text:
+            continue
+        try:
+            result = healer.heal_failure(error_text=error_text, test_id=case["name"])
+            case["analysis"] = _heal_result_to_analysis(result)
+            annotated += 1
+        except Exception:
+            continue
+    return annotated
+
+
+def _esc(text) -> str:
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def inject_analysis_banner(cases: list[dict], report_path: Path) -> bool:
+    """Prepend an AI Failure Analysis banner for the top failure into the HTML report.
+
+    Mirrors utils.ai_summary.inject_into_html_report: inserts a self-contained,
+    inline-styled block right after <body> so it renders without the report's
+    CSS. The "top" failure is the highest-confidence diagnosis. Best-effort —
+    a missing report or no analyses is a no-op. Returns True if it injected.
+    """
+    analyzed = [c for c in cases if c.get("analysis")]
+    if not report_path.exists() or not analyzed:
+        return False
+    html = report_path.read_text(encoding="utf-8", errors="ignore")
+    if "shreyzen-ai-analysis" in html:  # never double-inject
+        return False
+
+    top = max(analyzed, key=lambda c: c["analysis"].get("confidence", 0))
+    a = top["analysis"]
+    conf = round(a.get("confidence", 0) * 100)
+    causes = "".join(f"<li>{_esc(c)}</li>" for c in (a.get("possible_causes") or []))
+    fix = (a.get("suggested_fix") or "")[:1500]
+    fix_html = (
+        f'<div style="margin-top:8px;font-size:12px;color:#a78bfa;font-weight:700">SUGGESTED FIX '
+        f'({_esc(a.get("fix_kind", ""))})</div>'
+        f'<pre style="background:#060a13;color:#cbd5e1;padding:11px 13px;border-radius:8px;'
+        f'font-size:12px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:4px 0 0">'
+        f'{_esc(fix)}</pre>'
+    ) if fix else ""
+    symbol = (f' · symbol <code style="color:#93c5fd">{_esc(a["failing_symbol"])}</code>'
+              if a.get("failing_symbol") else "")
+    others = len(analyzed) - 1
+    more = (f'<div style="margin-top:8px;font-size:12px;color:#94a3b8">+{others} more failure(s) '
+            f'analysed — open the run in Shreyzen Studio for the full per-test breakdown.</div>'
+            if others else "")
+
+    banner = f"""
+<div id="shreyzen-ai-analysis" style="background:#111827;color:#e5e7eb;padding:18px 24px;
+     border-left:6px solid #8b5cf6;margin:0;font-family:system-ui,sans-serif;line-height:1.6">
+  <div style="font-size:15px;font-weight:800;color:#a78bfa">🤖 AI Failure Analysis — {_esc(top['name'])}</div>
+  <div style="font-size:13.5px;margin-top:6px">{_esc(a.get('root_cause') or a.get('explanation') or 'No root cause identified.')}</div>
+  <div style="font-size:12px;color:#94a3b8;margin-top:6px">
+    Confidence <b style="color:#a78bfa">{conf}%</b> · category <b>{_esc(a.get('category',''))}</b>
+    · via <b>{_esc(a.get('generated_by',''))}</b>{symbol}</div>
+  {f'<div style="margin-top:8px;font-size:12px;font-weight:700;color:#94a3b8">POSSIBLE CAUSES</div><ul style="margin:4px 0 0 18px;font-size:12.5px">{causes}</ul>' if causes else ''}
+  {fix_html}
+  {more}
+</div>
+"""
+    patched = re.sub(r"(<body[^>]*>)", lambda m: m.group(1) + banner, html, count=1)
+    if patched == html:
+        return False
+    report_path.write_text(patched, encoding="utf-8")
+    return True
+
+
 # ── Threaded runner ──────────────────────────────────────────────────────────
 
 class FunctionalRunner:
@@ -256,8 +424,10 @@ class FunctionalRunner:
 
             counts = {"passed": 0, "failed": 0, "skipped": 0, "errors": 0}
             deadline = time.time() + _RUN_TIMEOUT_S
+            full_log: list[str] = []  # unbounded copy for post-run AI analysis
             for line in self._proc.stdout:  # streams live
                 self._log(line)
+                full_log.append(line)
                 m = _STATUS_RE.search(line)
                 if m and "::" in line:
                     tok = m.group(1)
@@ -279,6 +449,10 @@ class FunctionalRunner:
                     self.stop()
                     break
             self._proc.wait(timeout=60)
+            try:
+                (run_dir / "pytest.log").write_text("".join(full_log), encoding="utf-8")
+            except OSError:
+                pass
             self._finalize(target, run_dir)
         except Exception as exc:  # pragma: no cover - defensive
             self._log(f"ERROR: {exc}")
@@ -297,6 +471,22 @@ class FunctionalRunner:
         junit = _parse_junit(run_dir / "junit.xml")
         ended = time.time()
         passed_overall = junit["tests"] > 0 and junit["failed"] == 0 and junit["errors"] == 0
+
+        # AI root-cause analysis for every failure (offline rule engine by
+        # default; richer when an LLM provider is configured). Mutates the case
+        # dicts in place, adding an `analysis` block the UI renders.
+        ai_analyzed = 0
+        try:
+            ai_analyzed = analyze_failures(junit["cases"], run_dir / "pytest.log")
+            analyzed_cases = [c for c in junit["cases"] if c.get("analysis")]
+            if analyzed_cases:
+                (run_dir / "analysis.json").write_text(
+                    json.dumps(analyzed_cases, indent=2), encoding="utf-8")
+                # Surface the top failure's diagnosis at the top of the HTML report.
+                inject_analysis_banner(junit["cases"], run_dir / "report.html")
+        except Exception as exc:  # analysis must never break a run
+            self._log(f"AI analysis skipped: {exc}")
+
         summary = {
             "run_id": self.state["run_id"],
             "selection": self.state["selection"],
@@ -307,6 +497,7 @@ class FunctionalRunner:
             "counts": {k: junit[k] for k in ("tests", "passed", "failed", "skipped", "errors")},
             "passed": passed_overall,
             "duration_s": round(ended - self.state.get("started_at", ended), 1),
+            "ai_analyzed": ai_analyzed,
             "timestamp": datetime.now().isoformat(timespec="seconds"),
         }
         (run_dir / "summary.json").write_text(json.dumps(summary, indent=2))
@@ -333,7 +524,8 @@ class FunctionalRunner:
             self._set(error="No tests ran — check the selection/target.")
         self._log(f"Done — {summary['counts']['passed']} passed, "
                   f"{summary['counts']['failed']} failed, "
-                  f"{summary['counts']['skipped']} skipped.")
+                  f"{summary['counts']['skipped']} skipped."
+                  + (f" 🤖 AI-analysed {ai_analyzed} failure(s)." if ai_analyzed else ""))
         # Enforce retention caps so run artifacts don't grow unbounded.
         from utils.retention import auto_prune
         auto_prune(log=self._log)

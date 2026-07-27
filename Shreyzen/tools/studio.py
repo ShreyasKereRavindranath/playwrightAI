@@ -1042,6 +1042,23 @@ code{background:var(--surface2);padding:2px 6px;border-radius:4px;font-size:12px
 [data-theme="dark"] .status-pill.completed{color:#4ade80}
 [data-theme="dark"] .status-pill.failed{color:#f87171}
 [data-theme="dark"] .status-pill.starting,[data-theme="dark"] .status-pill.finalizing{color:#fbbf24}
+/* ── AI Failure Analysis (Concept 4) ── */
+.ai-toggle{margin-left:8px;border:1px solid rgba(139,92,246,.4);background:rgba(139,92,246,.1);color:var(--purple);border-radius:6px;padding:2px 9px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap}
+.ai-toggle:hover{background:rgba(139,92,246,.2)}
+.ai-row td{background:linear-gradient(180deg,rgba(139,92,246,.06),transparent);padding:2px 16px 14px}
+.ai-card{border:1px solid rgba(139,92,246,.3);border-left:4px solid var(--purple);border-radius:10px;padding:14px 16px;background:var(--card)}
+.ai-head{font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.ai-reason{font-size:13px;color:var(--text);margin-bottom:11px;line-height:1.5}
+.ai-conf{display:flex;align-items:center;gap:10px;margin-bottom:11px}
+.ai-bar{flex:1;max-width:260px;height:8px;background:var(--surface2);border-radius:6px;overflow:hidden}
+.ai-bar-fill{height:100%;background:linear-gradient(90deg,#22c55e,#8b5cf6);transition:width .4s}
+.ai-conf-val{font-weight:700;font-size:13px;color:var(--purple)}
+.ai-lbl{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:8px 0 4px}
+.ai-meta{font-size:12px;color:var(--muted);margin:3px 0}
+.ai-causes{margin:2px 0 6px 18px;font-size:12.5px;color:var(--text);line-height:1.6}
+.ai-fixnote{font-size:12.5px;color:var(--muted);margin:6px 0;line-height:1.5}
+.ai-fix pre{background:#0f172a;color:#cbd5e1;border-radius:8px;padding:12px 14px;font-family:ui-monospace,Menlo,monospace;font-size:12px;overflow:auto;margin-top:4px;white-space:pre-wrap;word-break:break-word}
+[data-theme="dark"] .ai-fix pre{background:#060a13;border:1px solid var(--border)}
 ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 </style>
 </head>
@@ -1665,13 +1682,41 @@ async function fpoll(){
 
 function escapeHtml(x){return (x||'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));}
 const FST={passed:'bp',failed:'bf',error:'bf',skipped:'bs'};
+const GEN_BADGE={llm:'bb',rule:'bs',offline:'bs'};
 function drawFCases(cases){
-  $('tb-ftests').innerHTML=cases.length?cases.map(c=>`<tr>
-    <td style="font-family:monospace;font-size:12px;word-break:break-all">${c.name}</td>
-    <td><span class="badge ${FST[c.status]||'bs'}">${c.status.toUpperCase()}</span></td>
-    <td>${c.time}</td>
-    <td style="font-size:11.5px;color:var(--muted);word-break:break-word">${escapeHtml(c.message||'')}</td></tr>`).join('')
-    :'<tr><td colspan="4" class="empty">Waiting for results…</td></tr>';
+  if(!cases.length){$('tb-ftests').innerHTML='<tr><td colspan="4" class="empty">Waiting for results…</td></tr>';return;}
+  $('tb-ftests').innerHTML=cases.map((c,i)=>{
+    const hasAI=(c.status==='failed'||c.status==='error')&&c.analysis;
+    const toggle=hasAI?`<button class="ai-toggle" onclick="toggleAI(${i})">🤖 AI Analysis</button>`:'';
+    const main=`<tr>
+      <td style="font-family:monospace;font-size:12px;word-break:break-all">${escapeHtml(c.name)}</td>
+      <td><span class="badge ${FST[c.status]||'bs'}">${c.status.toUpperCase()}</span></td>
+      <td>${c.time}</td>
+      <td style="font-size:11.5px;color:var(--muted);word-break:break-word">${escapeHtml(c.message||'')} ${toggle}</td></tr>`;
+    const ai=hasAI?`<tr class="ai-row" id="ai-${i}"><td colspan="4">${aiPanel(c.analysis)}</td></tr>`:'';
+    return main+ai;
+  }).join('');
+}
+function toggleAI(i){const el=$('ai-'+i);if(el)el.style.display=(el.style.display==='none')?'table-row':'none';}
+function aiPanel(a){
+  const conf=Math.round((a.confidence||0)*100);
+  const causes=(a.possible_causes||[]).map(c=>`<li>${escapeHtml(c)}</li>`).join('');
+  const fix=a.suggested_fix?`<div class="ai-fix"><div class="ai-lbl">Suggested fix (${escapeHtml(a.fix_kind||'')})</div><pre>${escapeHtml(a.suggested_fix)}</pre></div>`:'';
+  const showNote=a.explanation&&a.explanation!==a.root_cause;
+  return `<div class="ai-card">
+    <div class="ai-head">🤖 AI Failure Analysis
+      <span class="badge ${GEN_BADGE[a.generated_by]||'bs'}">${escapeHtml(a.generated_by||'')}</span>
+      <span class="badge bb">${escapeHtml(a.category||'')}</span></div>
+    <div class="ai-reason">${escapeHtml(a.root_cause||a.explanation||'No root cause identified.')}</div>
+    <div class="ai-conf"><span class="ai-lbl" style="margin:0">Confidence</span>
+      <div class="ai-bar"><div class="ai-bar-fill" style="width:${conf}%"></div></div>
+      <span class="ai-conf-val">${conf}%</span></div>
+    ${a.failing_symbol?`<div class="ai-meta">Failing symbol: <code>${escapeHtml(a.failing_symbol)}</code></div>`:''}
+    ${a.file?`<div class="ai-meta">Source: <code>${escapeHtml(a.file)}</code></div>`:''}
+    ${causes?`<div class="ai-lbl">Possible causes</div><ul class="ai-causes">${causes}</ul>`:''}
+    ${showNote?`<div class="ai-fixnote">${escapeHtml(a.explanation)}</div>`:''}
+    ${fix}
+  </div>`;
 }
 function drawFVerdict(s){
   const v=$('f-verdict');

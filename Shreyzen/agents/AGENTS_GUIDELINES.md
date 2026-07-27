@@ -67,6 +67,13 @@ logs_and_reports/plans/ → saved TestPlan JSON
 - `utils/ai_self_heal.py` heals locators **at runtime** (during a test). The
   `Healer` agent heals **after** a run (CI/local) and can emit diffs. They are
   complementary; both route through `LLMClient`.
+- **Shreyzen Studio surfaces the Healer automatically.** When a functional run
+  finishes with failures, `tools/functional_engine.py` calls
+  `Healer.heal_failure(error_text, test_id)` for each failure (capped, best-effort)
+  and renders the diagnosis as an **AI Failure Analysis** panel per test, plus a
+  banner atop the run's HTML report. `heal_failure()` is the convenience entry that
+  locates the source file from the traceback and then calls `heal()`. Because the
+  Healer works offline, this needs no API key — keep that guarantee if you edit it.
 - `tools/generate_test.py` and `tools/repair_test.py` are the older single-shot
   CLIs. The `agents/` package is the cohesive, offline-capable successor; prefer
   `tools/agents_cli.py` going forward.
