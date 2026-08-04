@@ -81,6 +81,13 @@ except ImportError:
     print("Missing dependencies. Run: pip install -r requirements.txt")
     sys.exit(1)
 
+# config.config calls load_dotenv() at import time, loading config/.env into the
+# environment. Without this the Studio process never sees API keys from .env, so
+# every LLM provider reports "needs config" and the status badge never changes
+# when a key is added. Must run before get_service(). Config also exposes tunables
+# used below (e.g. AI_MAX_TOKENS, NL_REPAIR_*).
+from config.config import Config
+
 from load.catalog import PROFILES, SCENARIOS, API_ENDPOINTS, resolve_params
 from load.engine import LoadRunner, list_runs, run_blocking
 from tools import functional_engine as fe
@@ -418,17 +425,21 @@ def api_generate(req: GenerateRequest):
         raise HTTPException(status_code=503, detail="No LLM provider configured.")
     from tools import generate_test as gt
     page = (req.page or gt._infer_page(scenario)).strip()
-    feature = (req.feature or page).strip()
+    # Feature drives the test file name (tests/web/test_{feature}.py). When the
+    # user leaves it blank, name the file after the scenario itself — not the
+    # inferred page — so each described test gets its own readable file instead
+    # of all landing in a generic default like test_checkout.py.
+    feature = (req.feature or gt._to_snake(scenario) or page).strip()
     fixture = f"{page}_page" if page else "page"
     po = ""
     if not req.test_only:
         po = llm.complete(
             prompt=gt._PAGE_OBJECT_PROMPT.format(scenario=scenario, page_name=page),
-            system=gt._SYSTEM, max_tokens=800)
+            system=gt._SYSTEM, max_tokens=Config.AI_MAX_TOKENS)
     test = llm.complete(
         prompt=gt._TEST_PROMPT.format(scenario=scenario, page_fixture=fixture,
                                       feature=feature, scenario_snake_case=gt._to_snake(scenario)),
-        system=gt._SYSTEM, max_tokens=800)
+        system=gt._SYSTEM, max_tokens=Config.AI_MAX_TOKENS)
 
     def _strip(code):
         t = (code or "").strip()

@@ -62,13 +62,38 @@ class GeminiProvider(LLMProvider):
             raise self._map_error(exc)
         usage = getattr(resp, "usage_metadata", None)
         return LLMResponse(
-            text=(resp.text or "").strip(),
+            text=self._extract_text(resp),
             model=request.model or self._cfg.default_model or "gemini-2.5-flash",
             provider="gemini",
             usage=Usage(getattr(usage, "prompt_token_count", 0) or 0,
                         getattr(usage, "candidates_token_count", 0) or 0),
+            finish_reason=self._finish_reason(resp),
             raw=resp,
         )
+
+    @staticmethod
+    def _finish_reason(resp) -> str:
+        try:
+            fr = resp.candidates[0].finish_reason
+            return getattr(fr, "name", str(fr)) or ""
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _extract_text(resp) -> str:
+        """Concatenate text parts. `resp.text` raises when a response has no
+        clean text part (e.g. output was truncated after "thinking" ate the
+        token budget), so fall back to walking the candidate parts."""
+        try:
+            if resp.text:
+                return resp.text.strip()
+        except Exception:
+            pass
+        try:
+            parts = resp.candidates[0].content.parts or []
+            return "".join(getattr(p, "text", "") or "" for p in parts).strip()
+        except Exception:
+            return ""
 
     def stream(self, request: LLMRequest) -> Iterator[StreamChunk]:
         client = self._client()

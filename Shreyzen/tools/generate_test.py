@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from config.config import Config
 from utils.llm_client import LLMClient
 
 _SYSTEM = (
@@ -84,7 +85,9 @@ def main():
 
     scenario   = args.scenario
     page_name  = args.page or _infer_page(scenario)
-    feature    = args.feature or page_name
+    # Default the test file name to the scenario (not the page) so each test
+    # gets its own readable file, e.g. tests/web/test_user_cannot_checkout.py.
+    feature    = args.feature or _to_snake(scenario) or page_name
     page_fixture = f"{page_name}_page" if page_name else "page"
 
     print(f"\n🔧 Generating test artifacts for: '{scenario}'\n")
@@ -99,7 +102,7 @@ def main():
         po_code = llm.complete(
             prompt=_PAGE_OBJECT_PROMPT.format(scenario=scenario, page_name=page_name),
             system=_SYSTEM,
-            max_tokens=800,
+            max_tokens=Config.AI_MAX_TOKENS,
         )
         print(po_code)
         po_path = Path(f"pages/{page_name}_page.py")
@@ -120,7 +123,7 @@ def main():
                 scenario_snake_case=_to_snake(scenario),
             ),
             system=_SYSTEM,
-            max_tokens=800,
+            max_tokens=Config.AI_MAX_TOKENS,
         )
         print(test_code)
 
