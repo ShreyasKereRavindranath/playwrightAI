@@ -1,0 +1,25 @@
+{
+  "_comment": "LLM pricing overrides — USD per 1,000,000 tokens as [input, output] (or {\"input\":, \"output\":}). Loaded by utils/llm_observability.py to cost every call for `python -m tools.llm_usage`. These are approximate public list prices; edit to match your account/contract. Keys are matched case-insensitively by longest model-name prefix, so dated/versioned model ids (e.g. gpt-4o-mini-2026-01-01) resolve to their family. Keys starting with _ or // are ignored. Local providers are free.",
+  "_updated": "2026-08-11",
+
+  "gpt-4o-mini": [0.15, 0.60],
+  "gpt-4o": [2.50, 10.00],
+  "gpt-4.1": [2.00, 8.00],
+  "gpt-4.1-mini": [0.40, 1.60],
+  "gpt-4.1-nano": [0.10, 0.40],
+  "o4-mini": [1.10, 4.40],
+
+  "claude-opus-4": [15.00, 75.00],
+  "claude-sonnet-5": {"input": 3.00, "output": 15.00},
+  "claude-sonnet": [3.00, 15.00],
+  "claude-haiku-4-5": [1.00, 5.00],
+  "claude-haiku": [0.80, 4.00],
+
+  "gemini-2.5-pro": [1.25, 10.00],
+  "gemini-2.5-flash": [0.30, 2.50],
+  "gemini-1.5-flash": [0.075, 0.30],
+
+  "ollama": [0.0, 0.0],
+  "lmstudio": [0.0, 0.0],
+  "openai_compatible": [0.0, 0.0]
+}

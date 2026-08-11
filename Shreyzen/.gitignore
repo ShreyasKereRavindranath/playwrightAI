@@ -13,6 +13,9 @@ __pycache__/
 # ── Node ──────────────────────────────────────────────────────────────────
 node_modules/
 
+# ── Auto-provisioned tools (Allure CLI, etc.) ─────────────────────────────
+.tools/
+
 # ── Test run artifacts ────────────────────────────────────────────────────
 logs_and_reports/screenshots/
 logs_and_reports/videos/

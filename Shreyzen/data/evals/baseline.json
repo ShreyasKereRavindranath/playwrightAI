@@ -1,0 +1,101 @@
+{
+  "offline": {
+    "heal": {
+      "accuracy": 1.0,
+      "total": 11,
+      "passed": 11,
+      "by_category": {
+        "strict_mode_violation": {
+          "total": 2,
+          "correct": 2
+        },
+        "locator_timeout": {
+          "total": 2,
+          "correct": 2
+        },
+        "url_mismatch": {
+          "total": 1,
+          "correct": 1
+        },
+        "assertion_mismatch": {
+          "total": 2,
+          "correct": 2
+        },
+        "hardcoded_wait": {
+          "total": 1,
+          "correct": 1
+        },
+        "import_or_collection_error": {
+          "total": 2,
+          "correct": 2
+        },
+        "unknown": {
+          "total": 1,
+          "correct": 1
+        }
+      }
+    },
+    "flaky": {
+      "accuracy": 1.0,
+      "total": 8,
+      "passed": 8,
+      "by_category": {
+        "timing": {
+          "total": 2,
+          "correct": 2
+        },
+        "animation": {
+          "total": 1,
+          "correct": 1
+        },
+        "network": {
+          "total": 1,
+          "correct": 1
+        },
+        "selector": {
+          "total": 1,
+          "correct": 1
+        },
+        "cross_browser": {
+          "total": 1,
+          "correct": 1
+        },
+        "order_dependency": {
+          "total": 1,
+          "correct": 1
+        },
+        "unknown": {
+          "total": 1,
+          "correct": 1
+        }
+      }
+    },
+    "triage": {
+      "accuracy": 1.0,
+      "total": 7,
+      "passed": 7,
+      "by_category": {
+        "flaky": {
+          "total": 1,
+          "correct": 1
+        },
+        "environment": {
+          "total": 2,
+          "correct": 2
+        },
+        "test_bug": {
+          "total": 2,
+          "correct": 2
+        },
+        "product_bug": {
+          "total": 1,
+          "correct": 1
+        },
+        "unknown": {
+          "total": 1,
+          "correct": 1
+        }
+      }
+    }
+  }
+}

@@ -3,7 +3,7 @@
 [![CI](https://github.com/ShreyasKereRavindranath/playwrightAI/actions/workflows/pr-checks.yml/badge.svg)](https://github.com/ShreyasKereRavindranath/playwrightAI/actions/workflows/pr-checks.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
-[![Playwright](https://img.shields.io/badge/Playwright-1.49-2EAD33.svg)](https://playwright.dev/python/)
+[![Playwright](https://img.shields.io/badge/Playwright-1.62-2EAD33.svg)](https://playwright.dev/python/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Code of Conduct](https://img.shields.io/badge/Contributor%20Covenant-2.1-purple.svg)](CODE_OF_CONDUCT.md)
 
@@ -24,11 +24,12 @@ runnable locally with no commands to memorise.
 - **UI tests** (Playwright) split by layer: `api` · `web` · `mobile`
 - **Load testing** (Locust): 6 profiles, custom virtual-user control, live dashboard, plus **per-endpoint selection** (pick exactly which APIs to hit)
 - **Reports everywhere**: HTML · JUnit · JSON · Allure · **Extent-style dashboard**
-- **AI capabilities**: self-healing locators (that **auto-PR the Page Object fix**), **self-validating** NL→test generation (auto-repaired until it collects), **flaky-test diagnosis + auto-quarantine**, **failure root-cause clustering** (product/test/flaky/env triage), auto-repair, **AI failure analysis** (root-cause + suggested fix on every failed test), test-quality audit, run summaries — **pluggable across OpenAI · Anthropic · Gemini · Ollama · LM Studio · custom endpoints**
+- **AI capabilities**: self-healing locators (that **auto-PR the Page Object fix**), **self-validating** NL→test generation (auto-repaired until it collects), **flaky-test diagnosis + auto-quarantine**, **failure root-cause clustering** (product/test/flaky/env triage), auto-repair, **AI failure analysis** (root-cause + suggested fix on every failed test, enriched with browser console/network diagnostics), test-quality audit, run summaries — **pluggable across OpenAI · Anthropic · Gemini · Ollama · LM Studio · custom endpoints**
+- **Trustworthy & cost-aware AI**: an **eval harness** scores the AI classifiers against golden datasets with a **CI regression gate**, and every LLM call is **cost/latency-observed** with **budget guardrails** and optional **model routing/fallback** (cheap-model-first, provider failover) — spend is visible via `python -m tools.llm_usage` and bounded by config
 - **Agent-native**: an **MCP server** exposes run/generate/heal/diagnose/impact/load as tools, so Claude Code or Cursor can drive the framework conversationally
 - **Drop onto any project**: `shreyzen init` scaffolds config + a starter Page Object/test; `shreyzen doctor` validates your environment
 - **CI ready**: GitHub Actions (PR checks, on-demand load, nightly soaks) **and a Jenkins pipeline**
-- **Zero-friction browsers**: the required browser auto-installs on first run
+- **Zero-friction setup**: the required browser auto-installs on first run, and the Allure CLI auto-installs on first report view (no Homebrew/npm needed)
 
 ---
 
@@ -200,7 +201,7 @@ A lightweight snapshot of where Shreyzen is headed — see the
 [issues](https://github.com/ShreyasKereRavindranath/playwrightAI/issues) for
 details and to weigh in.
 
-- **Recently shipped** — AI Failure Analysis in Studio: root-cause + confidence + suggested fix on every failed test, with the top failure injected into the run's HTML report (works offline).
+- **Recently shipped** — upgraded to **Playwright 1.62** (WebP screenshots, retrospective console/network diagnostics feeding AI failure analysis); an **AI-feature eval harness** with a CI regression gate (`python -m tools.eval`); **LLM cost/latency observability + budget guardrails + model routing/fallback** (`python -m tools.llm_usage`); and **auto-installing Allure** (no Homebrew/npm). Earlier: AI Failure Analysis in Studio (root-cause + confidence + suggested fix on every failed test, injected atop the run's HTML report; works offline).
 - **In progress** — sharper AI auto-repair, richer run-comparison metrics.
 - **Planned** — visual-regression baselines in Studio, more Locust scenarios, downloadable Allure trend history.
 - **Ideas / help wanted** — additional LLM providers, accessibility (a11y) test layer, container/devcontainer setup.

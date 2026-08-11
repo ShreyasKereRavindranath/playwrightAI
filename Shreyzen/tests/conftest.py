@@ -140,6 +140,61 @@ def _safe_name(nodeid: str, max_len: int = 120) -> str:
     return name[:max_len]
 
 
+def _screenshot(page: Page, stem: Path) -> Optional[Path]:
+    """Full-page screenshot in the configured format, PNG-fallback on old Playwright.
+
+    WebP (Config.SCREENSHOT_FORMAT, default) needs Playwright ≥1.62; if the
+    installed build rejects it we retry as PNG so screenshots never silently
+    vanish after a partial upgrade. Returns the written path, or None on failure.
+    """
+    fmt = Config.SCREENSHOT_FORMAT if Config.SCREENSHOT_FORMAT in ("webp", "png", "jpeg") else "png"
+    dest = stem.with_suffix(f".{fmt}")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    kwargs = {"path": str(dest), "full_page": True}
+    if fmt in ("webp", "jpeg"):
+        kwargs["type"] = fmt
+        kwargs["quality"] = Config.SCREENSHOT_QUALITY
+    try:
+        page.screenshot(**kwargs)
+        return dest
+    except Exception as exc:
+        if fmt == "png":
+            logger.warning("Screenshot failed: %s", exc)
+            return None
+        # Older Playwright (no webp/quality) — fall back to a plain PNG.
+        logger.debug("Screenshot format '%s' unavailable (%s); using png", fmt, exc)
+        png = stem.with_suffix(".png")
+        try:
+            page.screenshot(path=str(png), full_page=True)
+            return png
+        except Exception as exc2:
+            logger.warning("Screenshot failed: %s", exc2)
+            return None
+
+
+# Per-run sidecar mapping nodeid → browser-diagnostics text. Written on failure
+# in the makereport hook; read by tools.functional_engine so the Healer's AI
+# root-cause analysis sees the page's console/JS/network signal, not just the
+# Python traceback. Lives in ARTIFACT_DIR (== the Studio run dir when driven by
+# the engine) as browser_diagnostics.json.
+def _write_diagnostics_sidecar(nodeid: str, text: str) -> None:
+    if not text:
+        return
+    try:
+        ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+        path = ARTIFACT_DIR / "browser_diagnostics.json"
+        data = {}
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+        data[nodeid] = text
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.debug("Diagnostics sidecar write skipped: %s", exc)
+
+
 # ── Session start ──────────────────────────────────────────────────────────
 
 def pytest_addoption(parser):
@@ -363,13 +418,10 @@ def pytest_runtest_makereport(item, call):
             want = Config.SCREENSHOT_ALL_TESTS or (Config.SCREENSHOT_ON_FAILURE and report.failed)
             if want:
                 ts   = datetime.now().strftime("%H-%M-%S")
-                dest = SCREENSHOT_DIR / f"{safe}__{ts}__{status}.png"
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    page.screenshot(path=str(dest), full_page=True)
+                stem = SCREENSHOT_DIR / f"{safe}__{ts}__{status}"
+                dest = _screenshot(page, stem)
+                if dest:
                     logger.info("Screenshot → %s", dest)
-                except Exception as exc:
-                    logger.warning("Screenshot skipped (%s): %s", safe, exc)
 
         # 2. Performance metrics (page must be open)
         if page is not None:
@@ -446,6 +498,21 @@ def pytest_runtest_makereport(item, call):
 
         # 5c. Persist failure detail for root-cause clustering (Capability 30).
         if report.failed and Config.FAILURE_TRACKING:
+            # Browser diagnostics: console errors, uncaught JS errors and failed
+            # network requests, read from the live page via Playwright's ≥1.56
+            # retrospective accessors. Surfaced in the report and fed to the AI
+            # root-cause analysis so a 500 or a JS TypeError is diagnosed as such.
+            diag_text = ""
+            if page is not None:
+                try:
+                    from utils import browser_diagnostics
+                    diag_text = browser_diagnostics.to_text(browser_diagnostics.capture(page))
+                    if diag_text:
+                        report.sections.append(("Browser diagnostics", diag_text))
+                        _write_diagnostics_sidecar(item.nodeid, diag_text)
+                except Exception as exc:
+                    logger.debug("Browser diagnostics skipped: %s", exc)
+
             fs = _get_failure_store()
             if fs:
                 try:
@@ -453,7 +520,7 @@ def pytest_runtest_makereport(item, call):
                     msg = tb.strip().splitlines()[-1] if tb.strip() else "test failed"
                     browser = item.funcargs.get("browser_name", "")
                     fs.record(item.nodeid, message=msg, traceback=tb,
-                              run_ts=RUN_TS, browser=browser)
+                              run_ts=RUN_TS, browser=browser, diagnostics=diag_text)
                 except Exception as exc:
                     logger.debug("Failure record skipped: %s", exc)
 

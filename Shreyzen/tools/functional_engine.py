@@ -219,6 +219,32 @@ def _heal_result_to_analysis(result) -> dict:
     }
 
 
+def _load_diagnostics(run_dir: Path) -> dict:
+    """Load the per-test browser-diagnostics sidecar written by conftest.
+
+    Returns a lookup keyed by both the full test-name token (function+params,
+    e.g. ``test_x[chromium]``) and its normalized bare name, so a JUnit case can
+    be matched either way. Empty dict when the sidecar is absent.
+    """
+    path = run_dir / "browser_diagnostics.json"
+    if not path.exists():
+        # conftest writes the sidecar to SHREYZEN_ARTIFACT_DIR, which the engine
+        # points at run_dir/artifacts (see _run).
+        path = run_dir / "artifacts" / "browser_diagnostics.json"
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    lookup: dict = {}
+    for nodeid, text in raw.items():
+        token = nodeid.split("::", 1)[1] if "::" in nodeid else nodeid
+        lookup[token] = text
+        lookup.setdefault(_norm_test_name(token), text)
+    return lookup
+
+
 def analyze_failures(cases: list[dict], log_path: Path) -> int:
     """Attach an AI root-cause `analysis` dict to each failed/error case in place.
 
@@ -237,6 +263,7 @@ def analyze_failures(cases: list[dict], log_path: Path) -> int:
 
     healer = Healer()
     log_text = log_path.read_text(encoding="utf-8", errors="ignore") if log_path.exists() else ""
+    diagnostics = _load_diagnostics(log_path.parent)
 
     # Map the per-failure tracebacks parsed from the log to their cases by name,
     # so each analysis is source-aware (real traceback → locates the .py file).
@@ -254,6 +281,11 @@ def analyze_failures(cases: list[dict], log_path: Path) -> int:
         error_text = blocks_by_name.get(_norm_test_name(case["name"])) or case.get("message", "")
         if not error_text:
             continue
+        # Enrich with browser diagnostics (console/JS/network) when captured —
+        # the console/network signal often *is* the root cause.
+        diag = diagnostics.get(case["name"]) or diagnostics.get(_norm_test_name(case["name"]))
+        if diag:
+            error_text = f"{error_text}\n\n--- Browser diagnostics ---\n{diag}"
         try:
             result = healer.heal_failure(error_text=error_text, test_id=case["name"])
             case["analysis"] = _heal_result_to_analysis(result)

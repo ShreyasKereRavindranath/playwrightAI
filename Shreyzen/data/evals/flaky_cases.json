@@ -1,0 +1,81 @@
+[
+  {
+    "id": "timing_timeout_text",
+    "failure_text": "TimeoutError: Timeout 30000ms exceeded waiting for locator('[data-test=title]')",
+    "history": [
+      {"outcome": "FAILED", "duration": 30.1, "browser": "chromium"},
+      {"outcome": "PASSED", "duration": 2.3, "browser": "chromium"}
+    ],
+    "expected_category": "timing"
+  },
+  {
+    "id": "animation_unstable_text",
+    "failure_text": "locator.click: Element is not stable - retrying click action, attempt #3",
+    "history": [
+      {"outcome": "FAILED", "duration": 4.0, "browser": "chromium"},
+      {"outcome": "PASSED", "duration": 3.6, "browser": "chromium"}
+    ],
+    "expected_category": "animation"
+  },
+  {
+    "id": "network_conn_reset_text",
+    "failure_text": "net::ERR_CONNECTION_RESET at https://api.example.com/checkout (503)",
+    "history": [
+      {"outcome": "FAILED", "duration": 5.0, "browser": "chromium"},
+      {"outcome": "PASSED", "duration": 4.8, "browser": "chromium"}
+    ],
+    "expected_category": "network"
+  },
+  {
+    "id": "selector_no_node_text",
+    "failure_text": "Error: no node found for selector: .shopping_cart_badge",
+    "history": [
+      {"outcome": "FAILED", "duration": 3.2, "browser": "chromium"},
+      {"outcome": "PASSED", "duration": 3.0, "browser": "chromium"}
+    ],
+    "expected_category": "selector"
+  },
+  {
+    "id": "cross_browser_webkit_only",
+    "failure_text": "",
+    "history": [
+      {"outcome": "FAILED", "duration": 3.1, "browser": "webkit"},
+      {"outcome": "PASSED", "duration": 2.9, "browser": "chromium"},
+      {"outcome": "FAILED", "duration": 3.3, "browser": "webkit"},
+      {"outcome": "PASSED", "duration": 3.0, "browser": "chromium"}
+    ],
+    "expected_category": "cross_browser"
+  },
+  {
+    "id": "timing_high_variance",
+    "failure_text": "",
+    "history": [
+      {"outcome": "PASSED", "duration": 1.0, "browser": "chromium"},
+      {"outcome": "FAILED", "duration": 12.0, "browser": "chromium"},
+      {"outcome": "PASSED", "duration": 2.0, "browser": "chromium"},
+      {"outcome": "FAILED", "duration": 15.0, "browser": "chromium"}
+    ],
+    "expected_category": "timing"
+  },
+  {
+    "id": "order_dependency_alternating",
+    "failure_text": "",
+    "history": [
+      {"outcome": "FAILED", "duration": 2.0, "browser": "chromium"},
+      {"outcome": "PASSED", "duration": 2.1, "browser": "chromium"},
+      {"outcome": "FAILED", "duration": 2.0, "browser": "chromium"},
+      {"outcome": "PASSED", "duration": 2.05, "browser": "chromium"}
+    ],
+    "expected_category": "order_dependency"
+  },
+  {
+    "id": "unknown_no_signal",
+    "failure_text": "",
+    "history": [
+      {"outcome": "PASSED", "duration": 2.0, "browser": "chromium"},
+      {"outcome": "FAILED", "duration": 2.1, "browser": "chromium"},
+      {"outcome": "FAILED", "duration": 2.0, "browser": "chromium"}
+    ],
+    "expected_category": "unknown"
+  }
+]

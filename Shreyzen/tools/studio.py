@@ -28,7 +28,6 @@ Every run writes html + junit + json + allure (with run context) under logs_and_
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -318,7 +317,12 @@ def _serve_allure(base: Path, run_id: str, link_prefix: str, refresh: int):
 
     report = run_dir / "allure-report" / "index.html"
     if refresh or not report.exists():
-        allure_bin = shutil.which("allure")
+        # Resolve the CLI: system install → previously-downloaded copy → auto
+        # download from GitHub (no Homebrew/npm). Returns None if it can't be
+        # provisioned (e.g. no Java), in which case we show the fallback.
+        from config.config import Config
+        from utils.allure_bootstrap import ensure_allure_cli
+        allure_bin = ensure_allure_cli(auto_install=Config.ALLURE_AUTO_INSTALL)
         if not allure_bin:
             return HTMLResponse(_allure_missing_html(f"{link_prefix}/{run_id}", results),
                                 status_code=503)
@@ -342,12 +346,17 @@ def _serve_allure(base: Path, run_id: str, link_prefix: str, refresh: int):
 def _allure_missing_html(self_link: str, results: Path) -> str:
     return (
         "<div style='font-family:system-ui;padding:40px;max-width:640px;margin:auto'>"
-        "<h2>⚠️ Allure CLI not found</h2>"
-        "<p>Install the Allure command-line tool to view reports in the browser:</p>"
+        "<h2>⚠️ Allure report unavailable</h2>"
+        "<p>Shreyzen auto-downloads the Allure CLI on demand (no Homebrew/npm), "
+        "but it also needs a <b>Java runtime</b> to render — which wasn't found. "
+        "Install a JRE, then reload:</p>"
+        "<pre>brew install openjdk        # macOS\n"
+        "sudo apt install default-jre  # Debian/Ubuntu</pre>"
+        "<p>Meanwhile the run's <b>HTML</b> and <b>Extent</b> reports need no extra "
+        "tools and are already available from the run's Results panel.</p>"
+        "<p>Prefer a global install? Any of these also work:</p>"
         "<pre>brew install allure        # macOS\n"
-        "# or: npm install -g allure-commandline</pre>"
-        "<p>Or view it directly without installing globally:</p>"
-        f"<pre>allure serve {results}</pre>"
+        "npm install -g allure-commandline</pre>"
         f"<p>Then reload <a href='{self_link}'>this page</a>.</p></div>"
     )
 

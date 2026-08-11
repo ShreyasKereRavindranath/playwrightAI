@@ -27,6 +27,11 @@ class Config:
     # via `--with-deps` (Linux/CI; requires root).
     AUTO_INSTALL_BROWSERS: bool = os.getenv("AUTO_INSTALL_BROWSERS", "true").lower() == "true"
     INSTALL_BROWSER_DEPS: bool = os.getenv("INSTALL_BROWSER_DEPS", "false").lower() == "true"
+    # Auto-provision the Allure CLI when a report is requested and no `allure` is
+    # on PATH — downloaded from GitHub into .tools/allure/ (no Homebrew/npm). When
+    # it can't be provisioned (e.g. no Java), reports fall back to the native
+    # pytest-html / Extent output, so Allure is an enhancement, never required.
+    ALLURE_AUTO_INSTALL: bool = os.getenv("ALLURE_AUTO_INSTALL", "true").lower() == "true"
     VIEWPORT_WIDTH: int = int(os.getenv("VIEWPORT_WIDTH", "1280"))
     VIEWPORT_HEIGHT: int = int(os.getenv("VIEWPORT_HEIGHT", "720"))
 
@@ -74,6 +79,29 @@ class Config:
 
     # ── Capability: AI Test Summary ───────────────────────────────────────────
     AI_SUMMARY: bool = os.getenv("AI_SUMMARY", "false").lower() == "true"
+
+    # ── Capability: AI-Feature Eval Harness ───────────────────────────────────
+    # `python -m tools.eval` scores the AI classifiers (heal / flaky / triage)
+    # against golden datasets in data/evals/. In --gate mode a suite fails CI if
+    # its accuracy drops more than this fraction below the recorded baseline.
+    EVAL_REGRESSION_THRESHOLD: float = float(os.getenv("EVAL_REGRESSION_THRESHOLD", "0.05"))
+
+    # ── Capability: LLM Cost/Latency Observability + Guardrails ───────────────
+    # Every LLM call is timed, costed, and (optionally) persisted to
+    # logs_and_reports/llm_usage.db; inspect with `python -m tools.llm_usage`.
+    LLM_OBSERVABILITY: bool = os.getenv("LLM_OBSERVABILITY", "true").lower() == "true"
+    # Per-process budget guardrails. When a ceiling is hit, further LLM calls are
+    # blocked and each AI feature falls back to its offline path (0 = unlimited).
+    LLM_MAX_COST_USD: float = float(os.getenv("LLM_MAX_COST_USD", "0"))
+    LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "0"))
+    LLM_MAX_CALLS: int = int(os.getenv("LLM_MAX_CALLS", "0"))
+    # Response cache — reuse identical prompts to cut cost/latency (off by default
+    # since responses can be intentionally varied). Persists across runs when on.
+    LLM_CACHE_ENABLED: bool = os.getenv("LLM_CACHE_ENABLED", "false").lower() == "true"
+    # Model routing & fallback — try the cheapest model first and escalate only on
+    # weak/empty output; fail over to the next configured provider on error. Off
+    # by default (each call uses the selected provider/model, as before).
+    LLM_ROUTING_ENABLED: bool = os.getenv("LLM_ROUTING_ENABLED", "false").lower() == "true"
 
     # ── Capability: Extent-style HTML Report ──────────────────────────────────
     # Opt-in consolidated interactive report (donut + category breakdown +
@@ -124,6 +152,12 @@ class Config:
     # ── Reporting ─────────────────────────────────────────────────────────────
     SCREENSHOT_ON_FAILURE: bool = os.getenv("SCREENSHOT_ON_FAILURE", "true").lower() == "true"
     SCREENSHOT_ALL_TESTS: bool = os.getenv("SCREENSHOT_ALL_TESTS", "true").lower() == "true"
+    # Screenshot image format. "webp" (Playwright ≥1.62) is 60–80% smaller than
+    # PNG at visually-lossless quality — a big win given we shoot every test.
+    # Falls back to PNG automatically on older Playwright. Values: webp | png | jpeg.
+    SCREENSHOT_FORMAT: str = os.getenv("SCREENSHOT_FORMAT", "webp").lower()
+    # Quality 0–100 for lossy formats (webp/jpeg); ignored for png.
+    SCREENSHOT_QUALITY: int = int(os.getenv("SCREENSHOT_QUALITY", "80"))
     RECORD_VIDEO: bool = os.getenv("RECORD_VIDEO", "true").lower() == "true"
     TRACE_ON_FAILURE: bool = os.getenv("TRACE_ON_FAILURE", "true").lower() == "true"
 

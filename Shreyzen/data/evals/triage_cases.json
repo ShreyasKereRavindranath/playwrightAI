@@ -1,0 +1,86 @@
+[
+  {
+    "id": "flaky_timeout_single_run",
+    "cluster": {
+      "signature": "timeouterror timed out",
+      "sample": "TimeoutError: Timeout 30000ms exceeded waiting for locator('[data-test=title]')",
+      "sample_traceback": "playwright._impl._errors.TimeoutError: Timeout 30000ms exceeded",
+      "runs": ["2026-08-01_10-00-00"],
+      "tests": ["tests/web/test_login.py::test_login"],
+      "count": 1
+    },
+    "expected_category": "flaky"
+  },
+  {
+    "id": "environment_timeout_multi_run",
+    "cluster": {
+      "signature": "timeouterror timed out",
+      "sample": "TimeoutError: Timeout 30000ms exceeded waiting for locator('[data-test=title]')",
+      "sample_traceback": "playwright._impl._errors.TimeoutError: Timeout 30000ms exceeded",
+      "runs": ["2026-08-01_10-00-00", "2026-08-02_10-00-00", "2026-08-03_10-00-00"],
+      "tests": ["tests/web/test_login.py::test_login"],
+      "count": 5
+    },
+    "expected_category": "environment"
+  },
+  {
+    "id": "environment_network_503",
+    "cluster": {
+      "signature": "connection error 503",
+      "sample": "requests.exceptions.ConnectionError: 503 Server Error: Service Unavailable",
+      "sample_traceback": "net::ERR_CONNECTION_REFUSED\n503 Server Error",
+      "runs": ["2026-08-01_10-00-00"],
+      "tests": ["tests/api/test_api_contracts.py::test_booking"],
+      "count": 2
+    },
+    "expected_category": "environment"
+  },
+  {
+    "id": "test_bug_import",
+    "cluster": {
+      "signature": "modulenotfounderror no module named",
+      "sample": "ModuleNotFoundError: No module named 'pages.legacy_login'",
+      "sample_traceback": "ImportError while importing test module",
+      "runs": ["2026-08-01_10-00-00"],
+      "tests": ["tests/web/test_login.py::test_login"],
+      "count": 1
+    },
+    "expected_category": "test_bug"
+  },
+  {
+    "id": "test_bug_fixture",
+    "cluster": {
+      "signature": "fixture not found",
+      "sample": "fixture 'authenticated_page' not found",
+      "sample_traceback": "E       fixture 'authenticated_page' not found",
+      "runs": ["2026-08-01_10-00-00"],
+      "tests": ["tests/web/test_cart.py::test_add"],
+      "count": 1
+    },
+    "expected_category": "test_bug"
+  },
+  {
+    "id": "product_bug_assertion",
+    "cluster": {
+      "signature": "assertionerror to_have_text",
+      "sample": "AssertionError: expect(locator).to_have_text('Order complete') — actual 'Error: card declined'",
+      "sample_traceback": "E   AssertionError: expect(locator).to_have_text",
+      "runs": ["2026-08-01_10-00-00", "2026-08-02_10-00-00"],
+      "tests": ["tests/web/test_checkout.py::test_finish"],
+      "count": 3
+    },
+    "expected_category": "product_bug"
+  },
+  {
+    "id": "unknown_runtime",
+    "cluster": {
+      "signature": "runtimeerror unexpected state",
+      "sample": "RuntimeError: unexpected state in reducer",
+      "sample_traceback": "E   RuntimeError: unexpected state in reducer",
+      "runs": ["2026-08-01_10-00-00"],
+      "tests": ["tests/web/test_misc.py::test_x"],
+      "count": 1
+    },
+    "expected_category": "unknown"
+  }
+]

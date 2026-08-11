@@ -9,6 +9,7 @@
 - `config.py` — the single source of truth for all configuration values
 - `.env.example` — schema reference for required environment variables (committed to source control)
 - `.env` — actual secret values (NEVER committed — already in `.gitignore`)
+- `llm_pricing.json` — optional, committed LLM cost overrides (USD per 1M tokens); read by `utils/llm_observability.py`
 
 ## Rules
 
@@ -19,7 +20,9 @@
 - Use clear prefix conventions: `TEST_USER_*` for credentials, `AI_*` for AI settings
 - Group related flags: browser provisioning (`AUTO_INSTALL_BROWSERS`,
   `INSTALL_BROWSER_DEPS`), capabilities (`VISUAL_REGRESSION`, `ACCESSIBILITY_AUDIT`,
-  `PERFORMANCE_METRICS`, `FLAKINESS_TRACKING`), and notifications (`SLACK_*`)
+  `PERFORMANCE_METRICS`, `FLAKINESS_TRACKING`), LLM ops (`LLM_OBSERVABILITY`,
+  `LLM_MAX_COST_USD`/`_TOKENS`/`_CALLS`, `LLM_ROUTING_ENABLED`, `LLM_CACHE_ENABLED`),
+  eval gate (`EVAL_REGRESSION_THRESHOLD`), and notifications (`SLACK_*`)
 
 ### DO NOT:
 - Call `os.environ` or `os.getenv` directly in any file outside `config/config.py`
@@ -29,4 +32,4 @@
 
 ---
 
-> Last reviewed: 2026-07-20
+> Last reviewed: 2026-08-11

@@ -8,6 +8,10 @@ of the app never imports a provider SDK.
 Supported providers: **OpenAI**, **Anthropic Claude**, **Google Gemini**,
 **Ollama** (local), **LM Studio** (local), and **any OpenAI-compatible endpoint**.
 
+Every call is also **cost/latency-observed**, subject to optional **budget
+guardrails**, and can be **routed/failed-over** across models and providers — see
+[Cost, guardrails, routing & caching](#cost-guardrails-routing--caching) below.
+
 ---
 
 ## Quick start
@@ -56,6 +60,7 @@ Infrastructure     →  providers/* (SDKs here only) · local/* bootstrappers
 | Strategy | retry/JSON-mode/auth strategies per provider |
 | Dependency injection | `LLMService(config=…)`, `LLMClient(service=…)`, `BaseAgent(llm=…)` |
 | Facade | `llm/service.py::LLMService` |
+| Observer + Guard hooks | `llm/policies/metrics.py` — sinks (cost/usage) + guards (budget) |
 
 ---
 
@@ -132,11 +137,47 @@ See `llm/providers/openai_provider.py` for the reference implementation and
 
 ---
 
+## Cost, guardrails, routing & caching
+
+The provider-neutral layer also makes LLM usage **visible, bounded, and
+resilient**. Full config reference: **[HOW_TO_CONFIGURE.md](HOW_TO_CONFIGURE.md)
+§ Capability 32**. Implementation: `utils/llm_observability.py` plugs sink/guard
+hooks into `llm/policies/metrics.py`; `llm/service.py` drives routing.
+
+**Observability** — every call is timed, costed, attributed to the calling
+feature, and (by default) persisted to `logs_and_reports/llm_usage.db`:
+```bash
+python -m tools.llm_usage              # calls, tokens, est. cost, p50/p95 latency, by feature
+python -m tools.llm_usage --by model   # or provider | feature ;  --recent N ;  --json
+```
+
+**Cost** is estimated from a built-in pricing table (USD per 1M tokens, matched
+by longest model-name prefix; local providers are free). Override precisely with
+`config/llm_pricing.json` — `[input, output]` or `{"input":, "output":}` per model.
+
+**Budget guardrails** — per-process ceilings; when hit, further calls are blocked
+and each AI feature degrades to its deterministic offline path (never fails the run):
+```ini
+LLM_MAX_COST_USD=0   LLM_MAX_TOKENS=0   LLM_MAX_CALLS=0   # 0 = unlimited
+```
+
+**Model routing & fallback** (`LLM_ROUTING_ENABLED=true`, off by default) — try the
+cheapest model first, escalate to a stronger one only on weak/empty output, and
+fail over to the next configured provider on error. Ladders/order live in
+`LLMService._ESCALATION` / `_FAILOVER`; a budget block stops the chain rather than
+failing over.
+
+**Caching** (`LLM_CACHE_ENABLED=true`, off by default) — reuse identical prompts to
+cut cost and latency; persists across runs in `llm_usage.db`.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | AI features silently no-op | `python tools/llm_config.py status` — provider likely `needs_config` (missing key) |
+| AI features stop partway through a run | A budget ceiling was hit (`LLM_MAX_COST_USD` / `_TOKENS` / `_CALLS`) — check `python -m tools.llm_usage`; raise/clear the cap |
 | "provider not configured" at test start | Set the selected provider's key, `AI_PROVIDER=ollama` (local), or disable AI flags |
 | Ollama won't start | Check `ollama serve` runs; set `OLLAMA_HOST`; see https://ollama.com/download |
 | LM Studio not reachable | Start its server (Developer → Start Server, :1234); set `LMSTUDIO_HOST` |

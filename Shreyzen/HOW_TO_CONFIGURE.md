@@ -597,8 +597,18 @@ python tools/dashboard.py               # → http://127.0.0.1:8766
 Pages: **Overview** (pass-rate & run trends), **Flakiness**, **Performance**
 (Web Vitals), **Run History**, **API Contracts**, and **Load Tests** — the last
 shows every load run's throughput/p95 with one-click links to its HTML, JSON,
-JUnit, and **Allure** reports (Allure is generated on demand; needs the `allure`
-CLI). Data is read from `logs_and_reports/flakiness.db`, `runs/*.json`, and
+JUnit, and **Allure** reports. Allure is generated on demand; the `allure` CLI
+**auto-installs** the first time you open an Allure report — downloaded from
+GitHub into `.tools/allure/` (no Homebrew/npm needed). It only needs a **Java
+runtime (JRE)** to render; when Java or the download is unavailable, the always-
+present **HTML** and **Extent** reports are used instead, so nothing breaks on a
+fresh machine. Control the auto-install with:
+
+```ini
+ALLURE_AUTO_INSTALL=true   # default; set false to require a manual `allure` on PATH
+```
+
+Data is read from `logs_and_reports/flakiness.db`, `runs/*.json`, and
 `load_runs/*/results.json` — no configuration required.
 
 ---
@@ -668,6 +678,13 @@ happened*.
 ```ini
 TRACE_ON_FAILURE=true   # write trace.zip for tests that fail (off = never trace)
 RECORD_VIDEO=true       # record video (only applies when HEADLESS=false)
+
+# Screenshots (captured on failure, or for every test when SCREENSHOT_ALL_TESTS=true)
+SCREENSHOT_ON_FAILURE=true   # capture a full-page screenshot when a test fails
+SCREENSHOT_ALL_TESTS=true    # also capture one for passing tests
+SCREENSHOT_FORMAT=webp       # webp | png | jpeg — webp needs Playwright ≥1.62 and is
+                             # 60–80% smaller than PNG; auto-falls back to PNG on older builds
+SCREENSHOT_QUALITY=80        # 0–100 for lossy formats (webp/jpeg); ignored for png
 ```
 
 Traces are written **only on failure** to keep disk use low, and are swept up by
@@ -675,6 +692,15 @@ the retention caps above. In Studio, a trace link opens the Playwright Trace
 Viewer (`playwright show-trace`) on the host; you can also download the
 `trace.zip` and drop it on [trace.playwright.dev](https://trace.playwright.dev).
 Videos play inline in the browser.
+
+On failure the framework also captures **browser diagnostics** — console
+errors, uncaught JS errors, and failed (4xx/5xx) network requests — using
+Playwright's retrospective accessors (`page.console_messages()`,
+`page.page_errors()`, `page.requests()`, Playwright ≥1.56). These need no config:
+when `FAILURE_TRACKING` is on they're attached to the HTML report, stored with the
+failure record, and fed into the AI Failure Analysis so root causes are
+network/console-aware. On older Playwright they degrade to empty rather than
+erroring.
 
 Endpoints: `GET /api/functional/artifacts/{run_id}` (list),
 `GET /fartifact/{run_id}/{name}` (download/stream),
@@ -1092,6 +1118,110 @@ Failures are stored in `logs_and_reports/flakiness.db` (`test_failures` table).
 The signature normalization, clustering, and heuristic are pure functions and
 the LLM is injectable, so the pipeline is fully unit-tested. Also exposed as the
 `cluster_failures` MCP tool (Capability 29).
+
+---
+
+## Capability 31 — AI-Feature Eval Harness
+
+The framework leans on several AI classifiers — failure healing/RCA
+(`heal`), flaky-test diagnosis (`flaky`), and cluster triage (`triage`). This
+capability answers the question every AI feature eventually faces: **"how do we
+know it's still right?"** It scores each classifier against a curated golden
+dataset and fails CI when accuracy regresses — so prompts, models, and
+heuristics can be changed with confidence.
+
+**Golden data:** hand-labelled cases in `data/evals/{heal,flaky,triage}_cases.json`
+— each an input plus its `expected_category`. Edit or extend these to encode the
+behaviour you care about; the datasets are themselves guarded by unit tests.
+
+**Run:**
+```bash
+python -m tools.eval                    # score all suites (offline heuristics — no API key)
+python -m tools.eval --ai               # score the LLM path instead (needs a provider)
+python -m tools.eval --suite heal       # one suite only
+python -m tools.eval --json             # machine-readable scorecard
+python -m tools.eval --update-baseline  # record current scores as the baseline
+python -m tools.eval --gate             # exit 1 if accuracy regressed vs baseline (CI)
+```
+
+**Two modes:** `offline` forces the deterministic heuristic (reproducible, secret-free,
+the recommended CI gate); `--ai` runs the real prompts/model against the same golden
+set to catch **prompt/model drift**. Baselines are stored per mode in
+`data/evals/baseline.json`, and `--gate` only ever compares a run to a baseline of the
+*same* mode.
+
+**Regression gate:**
+```ini
+EVAL_REGRESSION_THRESHOLD=0.05   # max allowed accuracy drop vs baseline before --gate fails
+```
+
+Typical CI step: `python -m tools.eval --gate` (offline) after any change to an
+AI prompt, category set, or heuristic. Scoring reports per-category accuracy and
+lists every miss (expected vs predicted), so a red gate is always explainable.
+The harness (`utils/eval_harness.py`) is pure and unit-tested in
+`tests/unit/test_eval_harness.py`.
+
+---
+
+## Capability 32 — LLM Cost/Latency Observability + Guardrails
+
+Makes the framework's LLM spend **visible and bounded**. Every AI call (healing,
+summary, triage, flaky diagnosis, generation, …) is timed, costed, attributed to
+the calling feature, and persisted — and per-process ceilings stop runaway spend
+by falling back to the offline paths once a budget is hit.
+
+**Observability** (on by default, no config needed):
+```ini
+LLM_OBSERVABILITY=true    # record every call to logs_and_reports/llm_usage.db
+```
+```bash
+python -m tools.llm_usage              # summary: calls, tokens, est. cost, p50/p95 latency, by feature
+python -m tools.llm_usage --by model   # group by provider | model | feature
+python -m tools.llm_usage --recent 20  # the last N calls
+python -m tools.llm_usage --json
+```
+
+**Cost** is estimated from a built-in pricing table (USD per 1M tokens, matched
+by model-name prefix; local providers are free). Override or extend it precisely
+with an optional `config/llm_pricing.json`:
+```json
+{ "gpt-4o-mini": [0.15, 0.60], "claude-sonnet-5": {"input": 3.0, "output": 15.0} }
+```
+
+**Guardrails** — per-process ceilings (0 = unlimited). When any is reached,
+further LLM calls are blocked and each AI feature degrades to its deterministic
+offline path instead of overspending (the run never fails on this):
+```ini
+LLM_MAX_COST_USD=0    # e.g. 0.50 → stop once estimated spend hits $0.50
+LLM_MAX_TOKENS=0      # e.g. 200000 → stop after 200k total tokens
+LLM_MAX_CALLS=0       # e.g. 100 → stop after 100 calls
+```
+
+**Caching** — reuse identical prompts to cut cost and latency (off by default;
+persists across runs in `llm_usage.db` when on):
+```ini
+LLM_CACHE_ENABLED=false
+```
+
+**Model routing & fallback** — try the cheapest capable model first and escalate
+to a stronger one only when the output is weak/empty; if a provider errors, fail
+over to the next *configured* provider. Off by default (each call uses the
+selected provider/model). Every hop is a normal instrumented call, so the
+cost/latency of the cheap attempt and any escalation both show up in
+`llm_usage`. The saving comes from the common case where the cheap model
+succeeds and the expensive one is never touched.
+```ini
+LLM_ROUTING_ENABLED=false
+```
+Escalation ladders (cheap→strong) and the provider failover order live in
+`LLMService._ESCALATION` / `_FAILOVER`. A budget-guard block (Capability 32
+ceilings) stops the whole chain immediately rather than failing over.
+
+Implementation: the provider-neutral `llm` package exposes sink/guard hooks
+(`llm/policies/metrics.py`) that the app-side policy (`utils/llm_observability.py`)
+plugs into via `LLMService`; nothing in `llm/` depends on the app. Cost, budget,
+feature attribution, store, and cache are unit-tested in
+`tests/unit/test_llm_observability.py`.
 
 ---
 

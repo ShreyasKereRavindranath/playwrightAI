@@ -1,0 +1,57 @@
+[
+  {
+    "id": "strict_mode_multiple",
+    "error_text": "playwright._impl._errors.Error: strict mode violation: locator(\".product\") resolved to 6 elements",
+    "expected_category": "strict_mode_violation"
+  },
+  {
+    "id": "strict_mode_add_to_cart",
+    "error_text": "Error: strict mode violation: get_by_role(\"button\", name=\"Add\") resolved to 3 elements:\n  1) <button data-test=\"add-to-cart-a\">…",
+    "expected_category": "strict_mode_violation"
+  },
+  {
+    "id": "locator_timeout_datatest",
+    "error_text": "playwright._impl._errors.TimeoutError: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"[data-test='add-to-cart']\")",
+    "expected_category": "locator_timeout"
+  },
+  {
+    "id": "locator_timeout_generic",
+    "error_text": "TimeoutError: Timeout 5000ms exceeded while running \"click\"",
+    "expected_category": "locator_timeout"
+  },
+  {
+    "id": "url_mismatch_regex",
+    "error_text": "AssertionError: Page URL mismatch\n  to_have_url(re.compile('.*/inventory.html'))\n  Expected URL to match .*/inventory.html but got /cart.html",
+    "expected_category": "url_mismatch"
+  },
+  {
+    "id": "assertion_text_mismatch",
+    "error_text": "AssertionError: Locator expected to have text 'Welcome'\n  expect(locator).to_have_text('Welcome')\n  Actual text: 'Hello there'",
+    "expected_category": "assertion_mismatch"
+  },
+  {
+    "id": "assertion_visible",
+    "error_text": "AssertionError: expect(locator).to_be_visible() failed — element is present but hidden",
+    "expected_category": "assertion_mismatch"
+  },
+  {
+    "id": "hardcoded_wait",
+    "error_text": "tests/web/test_checkout.py:42: in test_finish\n    time.sleep(3)  # let the spinner settle\nE   Exception: overlay still intercepting pointer events",
+    "expected_category": "hardcoded_wait"
+  },
+  {
+    "id": "import_error",
+    "error_text": "E   ModuleNotFoundError: No module named 'pages.legacy_login'\nERROR collecting tests/web/test_login.py",
+    "expected_category": "import_or_collection_error"
+  },
+  {
+    "id": "syntax_error",
+    "error_text": "E   SyntaxError: invalid syntax (test_cart.py, line 17)\n!!! Interrupted: errors during collection",
+    "expected_category": "import_or_collection_error"
+  },
+  {
+    "id": "unknown_zero_div",
+    "error_text": "E   ZeroDivisionError: division by zero",
+    "expected_category": "unknown"
+  }
+]

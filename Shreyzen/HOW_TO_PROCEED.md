@@ -332,6 +332,8 @@ runner) drives the framework with plain shell steps:
 | Load gate | `python tools/studio.py run --scenario crud --profile smoke` |
 | Selected-API perf | `python tools/studio.py run --scenario api_select --endpoints create,read --profile stress` |
 | Regression gate | `python -m tools.check_regressions --gate` |
+| AI eval gate | `python -m tools.eval --gate` |
+| LLM cost/usage report | `python -m tools.llm_usage` |
 
 A ready-to-use declarative pipeline lives at the **repo root**:
 [`../Jenkinsfile`](../Jenkinsfile). It creates a per-build virtualenv, runs the

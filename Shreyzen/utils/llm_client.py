@@ -17,6 +17,14 @@ from typing import Optional
 
 from llm.service import LLMService, get_service
 
+try:
+    # The budget guardrail raises this; caught separately so an intentional
+    # block logs quietly (debug) instead of as a completion "error".
+    from utils.llm_observability import LLMBudgetExceeded as _LLMBudgetExceeded
+except Exception:  # pragma: no cover - observability is optional
+    class _LLMBudgetExceeded(Exception):
+        ...
+
 logger = logging.getLogger(__name__)
 
 _SYSTEM_DEFAULT = (
@@ -44,13 +52,21 @@ class LLMClient:
         if not self.available:
             return ""
         try:
-            return self._service.complete_text(
-                prompt,
-                system=system or _SYSTEM_DEFAULT,
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
+            def _produce() -> str:
+                return self._service.complete_text(
+                    prompt,
+                    system=system or _SYSTEM_DEFAULT,
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+            from utils.llm_observability import maybe_cached
+            material = f"{system or _SYSTEM_DEFAULT}\x1f{prompt}\x1f{max_tokens}\x1f{temperature}"
+            return maybe_cached("text", self._provider_name(),
+                                model or self._current_model(), material, _produce)
+        except _LLMBudgetExceeded as exc:
+            logger.debug("LLM call skipped — budget guardrail: %s", exc)
+            return ""
         except Exception as exc:
             logger.error("LLM completion failed: %s", exc)
             return ""
@@ -65,12 +81,32 @@ class LLMClient:
         if not self.available:
             return {}
         try:
-            return self._service.complete_json(
-                prompt, system=system or _SYSTEM_DEFAULT, model=model
-            )
+            def _produce() -> dict:
+                return self._service.complete_json(
+                    prompt, system=system or _SYSTEM_DEFAULT, model=model
+                )
+            from utils.llm_observability import maybe_cached
+            material = f"{system or _SYSTEM_DEFAULT}\x1f{prompt}"
+            return maybe_cached("json", self._provider_name(),
+                                model or self._current_model(), material, _produce)
+        except _LLMBudgetExceeded as exc:
+            logger.debug("LLM call skipped — budget guardrail: %s", exc)
+            return {}
         except Exception as exc:
             logger.error("LLM JSON completion failed: %s", exc)
             return {}
+
+    def _provider_name(self) -> str:
+        try:
+            return self._service.current_provider_name()
+        except Exception:
+            return "?"
+
+    def _current_model(self) -> str:
+        try:
+            return self._service.current_model()
+        except Exception:
+            return ""
 
     @property
     def available(self) -> bool:
