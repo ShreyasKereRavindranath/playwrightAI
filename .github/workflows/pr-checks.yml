@@ -75,8 +75,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASE_URL: https://www.saucedemo.com
-      TEST_USER_EMAIL: ci@example.com
-      TEST_USER_PASSWORD: ci-password
+      # Public saucedemo demo credentials. The authenticated_page fixture logs in
+      # with these, so they must be real saucedemo creds (not placeholders) or
+      # the cart tests fail on login.
+      TEST_USER_EMAIL: standard_user
+      TEST_USER_PASSWORD: secret_sauce
       HEADLESS: "true"
       RECORD_VIDEO: "false"
     steps:
@@ -91,7 +94,14 @@ jobs:
       - name: Install Chromium (with OS deps)
         run: python -m playwright install --with-deps chromium
       - name: Web UI tests (desktop)
-        run: pytest tests/web -v --junitxml=logs_and_reports/web-junit.xml
+        # Re-enable pytest-rerunfailures (disabled by default in pytest.ini so the
+        # framework's flaky-detection sees real failures) for this CI-only run.
+        # Only retry transient network/timeout errors, not assertion failures.
+        run: >-
+          pytest tests/web -v
+          -p rerunfailures --reruns 2 --reruns-delay 3
+          --only-rerun 'TimeoutError|Timeout|ConnectionError|ERR_|net::|Connection'
+          --junitxml=logs_and_reports/web-junit.xml
       - name: Upload web artifacts (screenshots + report + junit)
         if: always()
         uses: actions/upload-artifact@v4
@@ -103,8 +113,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASE_URL: https://www.saucedemo.com
-      TEST_USER_EMAIL: ci@example.com
-      TEST_USER_PASSWORD: ci-password
+      # Public saucedemo demo credentials — see note in web-tests above.
+      TEST_USER_EMAIL: standard_user
+      TEST_USER_PASSWORD: secret_sauce
       HEADLESS: "true"
       RECORD_VIDEO: "false"
       MOBILE_DEVICE: "Pixel 5"
@@ -121,7 +132,12 @@ jobs:
         # Mobile emulation (is_mobile/touch) is a Chromium capability.
         run: python -m playwright install --with-deps chromium
       - name: Mobile UI tests (device emulation)
-        run: pytest tests/mobile -v --junitxml=logs_and_reports/mobile-junit.xml
+        # See web-tests: CI-only reruns limited to transient network errors.
+        run: >-
+          pytest tests/mobile -v
+          -p rerunfailures --reruns 2 --reruns-delay 3
+          --only-rerun 'TimeoutError|Timeout|ConnectionError|ERR_|net::|Connection'
+          --junitxml=logs_and_reports/mobile-junit.xml
       - name: Upload mobile artifacts (screenshots + report + junit)
         if: always()
         uses: actions/upload-artifact@v4
